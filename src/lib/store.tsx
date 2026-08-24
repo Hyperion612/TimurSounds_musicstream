@@ -1,51 +1,55 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { seedDB } from "./data";
-import type { DB, NewsItem, Release, Track, Upcoming } from "./data";
+import { emptyState } from "./data";
+import type { Artist, ArtistId, NewsItem, Release, State, Track, Upcoming } from "./data";
 import { delAudio } from "./db";
+import { SYNC_MODE, sync } from "./sync";
 
-const LS_DB = "ts_db_v3";
 const LS_AUTH = "ts_admin_authed";
 const LS_FAV = "ts_favs";
-const ADMIN_PASSWORD = "timursounds";
+export const ADMIN_PASSWORD = "timursounds";
 
-interface StoreCtx extends DB {
+interface StoreCtx extends State {
+  ready: boolean;
+  syncMode: "cloud" | "local";
+  online: number;
   isAdmin: boolean;
   login: (pw: string) => boolean;
   logout: () => void;
+  mutate: (fn: (s: State) => State) => void;
+  playsOf: (trackId: string) => number;
+  artistPlays: (artistId: ArtistId) => number;
+  artist: (id: ArtistId) => Artist;
   addTrack: (t: Track) => void;
   deleteTrack: (id: string) => void;
   addRelease: (r: Release) => void;
   deleteRelease: (id: string) => void;
   addNews: (n: NewsItem) => void;
   deleteNews: (id: string) => void;
-  setUpcoming: (u: Upcoming | null) => void;
-  incPlays: (id: string) => void;
+  addUpcoming: (u: Upcoming) => void;
+  removeUpcoming: (id: string) => void;
+  saveArtist: (a: Artist) => void;
+  incPlays: (trackId: string) => void;
+  resetAll: () => void;
   favs: string[];
   toggleFav: (id: string) => void;
-  resetDemo: () => void;
   getTrack: (id: string) => Track | undefined;
   getRelease: (id: string) => Release | undefined;
 }
 
 const Ctx = createContext<StoreCtx | null>(null);
 
-function loadDB(): DB {
-  try {
-    const raw = localStorage.getItem(LS_DB);
-    if (raw) {
-      const parsed = JSON.parse(raw) as DB;
-      if (parsed && parsed.v === 3 && Array.isArray(parsed.tracks)) return parsed;
-    }
-  } catch {
-    /* повреждённые данные — пересеваем */
-  }
-  return seedDB();
-}
-
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [db, setDb] = useState<DB>(loadDB);
-  const [isAdmin, setIsAdmin] = useState<boolean>(() => sessionStorage.getItem(LS_AUTH) === "1");
+  const [state, setState] = useState<State>(() => emptyState());
+  const [ready, setReady] = useState(false);
+  const [online, setOnline] = useState(1);
+  const [isAdmin, setIsAdmin] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem(LS_AUTH) === "1";
+    } catch {
+      return false;
+    }
+  });
   const [favs, setFavs] = useState<string[]>(() => {
     try {
       return JSON.parse(localStorage.getItem(LS_FAV) ?? "[]") as string[];
@@ -53,14 +57,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return [];
     }
   });
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   useEffect(() => {
-    try {
-      localStorage.setItem(LS_DB, JSON.stringify(db));
-    } catch {
-      /* переполнение хранилища */
-    }
-  }, [db]);
+    let alive = true;
+    void sync.init().then((s) => {
+      if (!alive) return;
+      setState(s);
+      stateRef.current = s;
+      setReady(true);
+    });
+    const unSub = sync.subscribe((next) => {
+      if (!alive) return;
+      setState(next);
+      stateRef.current = next;
+    });
+    const unOnline = sync.watchOnline((n) => alive && setOnline(n));
+    return () => {
+      alive = false;
+      unSub();
+      unOnline();
+    };
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(LS_FAV, JSON.stringify(favs));
@@ -69,7 +88,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const login = useCallback((pw: string) => {
     if (pw.trim() === ADMIN_PASSWORD) {
       setIsAdmin(true);
-      sessionStorage.setItem(LS_AUTH, "1");
+      try {
+        sessionStorage.setItem(LS_AUTH, "1");
+      } catch {
+        /* noop */
+      }
       return true;
     }
     return false;
@@ -77,40 +100,61 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     setIsAdmin(false);
-    sessionStorage.removeItem(LS_AUTH);
+    try {
+      sessionStorage.removeItem(LS_AUTH);
+    } catch {
+      /* noop */
+    }
+  }, []);
+
+  const mutate = useCallback((fn: (s: State) => State) => {
+    const next = fn(stateRef.current);
+    stateRef.current = next;
+    setState(next);
+    void sync.write(() => next);
   }, []);
 
   const value = useMemo<StoreCtx>(
     () => ({
-      ...db,
+      ...state,
+      ready,
+      syncMode: SYNC_MODE,
+      online,
       isAdmin,
       login,
       logout,
       favs,
       toggleFav: (id) => setFavs((f) => (f.includes(id) ? f.filter((x) => x !== id) : [...f, id])),
-      addTrack: (t) => setDb((d) => ({ ...d, tracks: [t, ...d.tracks] })),
+      mutate,
+      playsOf: (trackId) => state.plays[trackId] ?? 0,
+      artistPlays: (artistId) =>
+        state.tracks.reduce((sum, t) => (t.artistId === artistId ? sum + (state.plays[t.id] ?? 0) : sum), 0),
+      artist: (id) => state.artists[id],
+      addTrack: (t) => mutate((s) => ({ ...s, tracks: [t, ...s.tracks] })),
       deleteTrack: (id) => {
-        setDb((d) => ({ ...d, tracks: d.tracks.filter((t) => t.id !== id) }));
+        mutate((s) => ({ ...s, tracks: s.tracks.filter((t) => t.id !== id) }));
         setFavs((f) => f.filter((x) => x !== id));
         void delAudio(id);
       },
-      addRelease: (r) => setDb((d) => ({ ...d, releases: [r, ...d.releases] })),
+      addRelease: (r) => mutate((s) => ({ ...s, releases: [r, ...s.releases] })),
       deleteRelease: (id) =>
-        setDb((d) => ({
-          ...d,
-          releases: d.releases.filter((r) => r.id !== id),
-          tracks: d.tracks.map((t) => (t.releaseId === id ? { ...t, releaseId: undefined } : t)),
+        mutate((s) => ({
+          ...s,
+          releases: s.releases.filter((r) => r.id !== id),
+          tracks: s.tracks.map((t) => (t.releaseId === id ? { ...t, releaseId: undefined } : t)),
         })),
-      addNews: (n) => setDb((d) => ({ ...d, news: [n, ...d.news] })),
-      deleteNews: (id) => setDb((d) => ({ ...d, news: d.news.filter((n) => n.id !== id) })),
-      setUpcoming: (u) => setDb((d) => ({ ...d, upcoming: u })),
-      incPlays: (id) =>
-        setDb((d) => ({ ...d, tracks: d.tracks.map((t) => (t.id === id ? { ...t, plays: t.plays + 1 } : t)) })),
-      resetDemo: () => setDb(seedDB()),
-      getTrack: (id) => db.tracks.find((t) => t.id === id),
-      getRelease: (id) => db.releases.find((r) => r.id === id),
+      addNews: (n) => mutate((s) => ({ ...s, news: [n, ...s.news] })),
+      deleteNews: (id) => mutate((s) => ({ ...s, news: s.news.filter((n) => n.id !== id) })),
+      addUpcoming: (u) => mutate((s) => ({ ...s, upcoming: [...s.upcoming, u].sort((a, b) => a.date - b.date) })),
+      removeUpcoming: (id) => mutate((s) => ({ ...s, upcoming: s.upcoming.filter((u) => u.id !== id) })),
+      saveArtist: (a) => mutate((s) => ({ ...s, artists: { ...s.artists, [a.id]: a } })),
+      incPlays: (trackId) =>
+        mutate((s) => ({ ...s, plays: { ...s.plays, [trackId]: (s.plays[trackId] ?? 0) + 1 } })),
+      resetAll: () => mutate(() => emptyState()),
+      getTrack: (id) => state.tracks.find((t) => t.id === id),
+      getRelease: (id) => state.releases.find((r) => r.id === id),
     }),
-    [db, isAdmin, login, logout, favs]
+    [state, ready, online, isAdmin, login, logout, favs, mutate]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

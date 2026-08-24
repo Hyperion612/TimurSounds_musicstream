@@ -1,4 +1,4 @@
-import { ARTISTS, fmtTime } from "../lib/data";
+import { fmtTime } from "../lib/data";
 import { usePlayer } from "../lib/player";
 import { useStore } from "../lib/store";
 import { Cover, Eq } from "./ui";
@@ -15,11 +15,11 @@ function SkipIcon({ back = false }: { back?: boolean }) {
 
 export function PlayerBar() {
   const { track, playing, position, toggle, next, prev, seek, volume, setVolume, repeat, toggleRepeat, queue, qIndex } = usePlayer();
-  const { favs, toggleFav } = useStore();
+  const { favs, toggleFav, artist: getArtist, online } = useStore();
 
   const dur = track?.duration ?? 0;
-  const artist = track ? ARTISTS[track.artistId] : null;
-  const feat = track?.feat ? ARTISTS[track.feat] : null;
+  const artist = track ? getArtist(track.artistId) : null;
+  const feat = track?.feat ? getArtist(track.feat) : null;
 
   return (
     <footer className="fixed bottom-0 inset-x-0 z-50 border-t border-line bg-coal/95 backdrop-blur">

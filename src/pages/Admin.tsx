@@ -1,11 +1,14 @@
-import { useMemo, useRef, useState } from "react";
-import { ARTISTS, KIND_LABEL, fmtDate, fmtTime } from "../lib/data";
-import type { ArtistId, NewsTag, ReleaseKind, Track } from "../lib/data";
+import { useState } from "react";
+import type { FormEvent, ReactNode } from "react";
+import { KIND_LABEL, fmtDate, fmtTime, pluralRu } from "../lib/data";
+import type { Artist, ArtistId, NewsTag, ReleaseKind, Track } from "../lib/data";
 import { SynthSource } from "../lib/audio";
 import { putAudio } from "../lib/db";
-import { useStore } from "../lib/store";
+import { ADMIN_PASSWORD, useStore } from "../lib/store";
+import { SYNC_MODE } from "../lib/sync";
 import { Countdown, Cover, Reveal } from "../components/ui";
 import { PauseIcon, PlayIcon } from "../components/cards";
+import { useRef } from "react";
 
 /* ================= login ================= */
 function Login() {
@@ -13,7 +16,7 @@ function Login() {
   const [pw, setPw] = useState("");
   const [err, setErr] = useState(false);
 
-  const submit = (e: React.FormEvent) => {
+  const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!login(pw)) {
       setErr(true);
@@ -36,7 +39,7 @@ function Login() {
           </div>
           <h1 className="font-display font-black text-2xl uppercase tracking-tight">Админ-панель</h1>
           <p className="text-sm text-paper/50 mt-2 leading-relaxed">
-            Доступ только для владельца площадки TimurSounds. Введите пароль, чтобы управлять треками, релизами и новостями.
+            Доступ только для владельца площадки TimurSounds. Введите пароль, чтобы управлять треками, релизами, анонсами и новостями.
           </p>
           <form onSubmit={submit} className="mt-6 space-y-3">
             <input
@@ -66,8 +69,9 @@ const btnPrimary =
   "bg-blue hover:bg-bluehi text-paper font-display font-bold text-xs tracking-wider px-5 py-3 rounded-lg transition-all hover:-translate-y-0.5 active:scale-95 disabled:opacity-40";
 const btnGhost =
   "border border-line hover:border-bluehi text-paper/70 hover:text-paper font-display font-bold text-xs tracking-wider px-5 py-3 rounded-lg transition-all hover:-translate-y-0.5";
+const msgCls = "text-xs text-sky border border-blue/40 bg-blue/10 rounded-lg px-3 py-2";
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block">
       <span className={labelCls}>{label}</span>
@@ -76,9 +80,19 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+function ArtistSelect({ value, onChange }: { value: ArtistId; onChange: (v: ArtistId) => void }) {
+  const { artists } = useStore();
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value as ArtistId)} className={inputCls}>
+      <option value="timur">{artists.timur.name} · {artists.timur.label}</option>
+      <option value="instasamka">{artists.instasamka.name} · {artists.instasamka.label}</option>
+    </select>
+  );
+}
+
 /* ================= track form ================= */
 function TrackForm() {
-  const { releases, addTrack } = useStore();
+  const { releases, addTrack, artists } = useStore();
   const [title, setTitle] = useState("");
   const [artistId, setArtistId] = useState<ArtistId>("timur");
   const [feat, setFeat] = useState<"" | ArtistId>("");
@@ -128,15 +142,13 @@ function TrackForm() {
     }, 5000);
   };
 
-  const submit = async (e: React.FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!title.trim() || busy) return;
     setBusy(true);
     const id = `u${Date.now().toString(36)}`;
     try {
-      if (mode === "file" && file) {
-        await putAudio(id, file);
-      }
+      if (mode === "file" && file) await putAudio(id, file);
       const t: Track = {
         id,
         title: title.trim().toUpperCase(),
@@ -147,11 +159,10 @@ function TrackForm() {
         bpm,
         seed,
         kind: mode === "file" && file ? "file" : "synth",
-        plays: 0,
         addedAt: Date.now(),
       };
       addTrack(t);
-      setMsg(`Трек «${t.title}» опубликован на площадке`);
+      setMsg(`Трек «${t.title}» опубликован — у всех слушателей`);
       setTitle("");
       setFile(null);
       setFileDur(null);
@@ -175,23 +186,20 @@ function TrackForm() {
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Например: СИНИЙ КОД" className={inputCls} required />
         </Field>
         <Field label="Артист">
-          <select value={artistId} onChange={(e) => setArtistId(e.target.value as ArtistId)} className={inputCls}>
-            <option value="timur">TIMUR · TimurSounds</option>
-            <option value="instasamka">INSTASAMKA · NaMneCash Music</option>
-          </select>
+          <ArtistSelect value={artistId} onChange={setArtistId} />
         </Field>
         <Field label="Feat. (необязательно)">
           <select value={feat} onChange={(e) => setFeat(e.target.value as "" | ArtistId)} className={inputCls}>
             <option value="">— без фита —</option>
-            <option value="timur">TIMUR</option>
-            <option value="instasamka">INSTASAMKA</option>
+            <option value="timur">{artists.timur.name}</option>
+            <option value="instasamka">{artists.instasamka.name}</option>
           </select>
         </Field>
         <Field label="Релиз (необязательно)">
           <select value={releaseId} onChange={(e) => setReleaseId(e.target.value)} className={inputCls}>
             <option value="">— вне релиза —</option>
             {releases.map((r) => (
-              <option key={r.id} value={r.id}>{r.title} · {ARTISTS[r.artistId].name}</option>
+              <option key={r.id} value={r.id}>{r.title} · {artists[r.artistId].name}</option>
             ))}
           </select>
         </Field>
@@ -238,9 +246,7 @@ function TrackForm() {
             {fileDur && <span className="text-xs text-sky tabular-nums">длительность: {fmtTime(fileDur)}</span>}
             <input type="file" accept="audio/*" className="hidden" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
           </label>
-          {!file && (
-            <p className="text-xs text-paper/35">Если файл не выбран, трек будет опубликован со звуком синтеза TimurSounds.</p>
-          )}
+          {!file && <p className="text-xs text-paper/35">Если файл не выбран, трек будет опубликован со звуком синтеза TimurSounds.</p>}
         </div>
       )}
 
@@ -248,7 +254,7 @@ function TrackForm() {
         <button type="submit" disabled={busy || !title.trim()} className={btnPrimary}>
           {busy ? "ПУБЛИКАЦИЯ…" : "ОПУБЛИКОВАТЬ НА ПЛОЩАДКЕ"}
         </button>
-        {msg && <span className="text-xs text-sky border border-blue/40 bg-blue/10 rounded-lg px-3 py-2">{msg}</span>}
+        {msg && <span className={msgCls}>{msg}</span>}
       </div>
     </form>
   );
@@ -263,7 +269,7 @@ function ReleaseForm() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [msg, setMsg] = useState("");
 
-  const submit = (e: React.FormEvent) => {
+  const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
     addRelease({
@@ -292,10 +298,7 @@ function ReleaseForm() {
           </Field>
         </div>
         <Field label="Артист">
-          <select value={artistId} onChange={(e) => setArtistId(e.target.value as ArtistId)} className={inputCls}>
-            <option value="timur">TIMUR</option>
-            <option value="instasamka">INSTASAMKA</option>
-          </select>
+          <ArtistSelect value={artistId} onChange={setArtistId} />
         </Field>
         <Field label="Тип">
           <select value={kind} onChange={(e) => setKind(e.target.value as ReleaseKind)} className={inputCls}>
@@ -310,7 +313,7 @@ function ReleaseForm() {
           <input type="number" min={2000} max={2100} value={year} onChange={(e) => setYear(Number(e.target.value))} className={`${inputCls} w-28`} />
         </Field>
         <button type="submit" className={btnPrimary}>СОЗДАТЬ РЕЛИЗ</button>
-        {msg && <span className="text-xs text-sky border border-blue/40 bg-blue/10 rounded-lg px-3 py-2">{msg}</span>}
+        {msg && <span className={msgCls}>{msg}</span>}
       </div>
     </form>
   );
@@ -324,11 +327,11 @@ function NewsForm() {
   const [body, setBody] = useState("");
   const [msg, setMsg] = useState("");
 
-  const submit = (e: React.FormEvent) => {
+  const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !body.trim()) return;
     addNews({ id: `n${Date.now().toString(36)}`, title: title.trim(), body: body.trim(), tag, date: Date.now() });
-    setMsg("Новость опубликована в ленте");
+    setMsg("Новость опубликована — видна всем слушателям");
     setTitle("");
     setBody("");
     setTimeout(() => setMsg(""), 3000);
@@ -357,15 +360,15 @@ function NewsForm() {
       </Field>
       <div className="flex flex-wrap items-center gap-3">
         <button type="submit" className={btnPrimary}>ОПУБЛИКОВАТЬ</button>
-        {msg && <span className="text-xs text-sky border border-blue/40 bg-blue/10 rounded-lg px-3 py-2">{msg}</span>}
+        {msg && <span className={msgCls}>{msg}</span>}
       </div>
     </form>
   );
 }
 
-/* ================= upcoming form ================= */
-function UpcomingForm() {
-  const { upcoming, setUpcoming } = useStore();
+/* ================= upcoming (анонсы) ================= */
+function UpcomingTab() {
+  const { upcoming, addUpcoming, removeUpcoming, artist } = useStore();
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState("сингл");
   const [artistId, setArtistId] = useState<ArtistId>("timur");
@@ -373,11 +376,18 @@ function UpcomingForm() {
   const [note, setNote] = useState("");
   const [msg, setMsg] = useState("");
 
-  const submit = (e: React.FormEvent) => {
+  const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !dateStr) return;
-    setUpcoming({ title: title.trim().toUpperCase(), kind, artistId, date: new Date(dateStr).getTime(), note: note.trim() || "Премьера на TimurSounds." });
-    setMsg("Дата ближайшего релиза обновлена");
+    addUpcoming({
+      id: `u${Date.now().toString(36)}`,
+      title: title.trim().toUpperCase(),
+      kind,
+      artistId,
+      date: new Date(dateStr).getTime(),
+      note: note.trim() || "Премьера на TimurSounds.",
+    });
+    setMsg("Анонс опубликован на главной странице");
     setTitle("");
     setNote("");
     setDateStr("");
@@ -385,30 +395,30 @@ function UpcomingForm() {
   };
 
   return (
-    <div className="grid lg:grid-cols-2 gap-4">
+    <div className="space-y-6">
       <form onSubmit={submit} className="border border-line rounded-xl bg-coal/60 p-6 space-y-4">
         <div className="flex items-center gap-2 mb-1">
           <span className="w-5 h-[3px] bg-blue" />
-          <h3 className="font-display font-bold text-sm tracking-wider uppercase">Дата ближайшего релиза</h3>
+          <h3 className="font-display font-bold text-sm tracking-wider uppercase">Добавить анонс релиза</h3>
         </div>
+        <p className="text-xs text-paper/40 -mt-1">
+          Анонсы показываются на главной странице с живым обратным отсчётом. Можно добавлять релизы обоих артистов — TIMUR и INSTASAMKA.
+        </p>
         <div className="grid grid-cols-2 gap-4">
           <div className="col-span-2">
             <Field label="Название">
               <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="СИНИЙ КОД: DELUXE" className={inputCls} required />
             </Field>
           </div>
+          <Field label="Артист">
+            <ArtistSelect value={artistId} onChange={setArtistId} />
+          </Field>
           <Field label="Формат">
             <select value={kind} onChange={(e) => setKind(e.target.value)} className={inputCls}>
               <option value="сингл">Сингл</option>
               <option value="альбом">Альбом</option>
               <option value="EP">EP</option>
               <option value="клип">Клип</option>
-            </select>
-          </Field>
-          <Field label="Артист">
-            <select value={artistId} onChange={(e) => setArtistId(e.target.value as ArtistId)} className={inputCls}>
-              <option value="timur">TIMUR</option>
-              <option value="instasamka">INSTASAMKA</option>
             </select>
           </Field>
           <Field label="Дата и время премьеры">
@@ -419,55 +429,201 @@ function UpcomingForm() {
           </Field>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <button type="submit" className={btnPrimary}>ОБНОВИТЬ АНОНС</button>
-          {upcoming && (
-            <button type="button" onClick={() => setUpcoming(null)} className={btnGhost}>
-              СКРЫТЬ БЛОК
-            </button>
-          )}
-          {msg && <span className="text-xs text-sky border border-blue/40 bg-blue/10 rounded-lg px-3 py-2">{msg}</span>}
+          <button type="submit" className={btnPrimary}>ОПУБЛИКОВАТЬ АНОНС</button>
+          {msg && <span className={msgCls}>{msg}</span>}
         </div>
       </form>
 
-      <div className="border border-line rounded-xl bg-gradient-to-br from-navy to-coal p-6 relative overflow-hidden">
-        <div className="absolute inset-0 bg-scan opacity-50 pointer-events-none" />
-        <div className="relative">
-          <div className="text-[10px] tracking-[0.3em] text-sky font-semibold mb-4">ТАК ЭТО ВИДЯТ СЛУШАТЕЛИ</div>
-          {upcoming ? (
-            <>
-              <div className="font-display font-black text-2xl uppercase">{upcoming.title}</div>
-              <div className="text-blue font-display font-bold mt-1">{ARTISTS[upcoming.artistId].name} · {upcoming.kind}</div>
-              <div className="mt-5">
-                <Countdown date={upcoming.date} />
+      {upcoming.length > 0 && (
+        <div className="grid md:grid-cols-2 gap-4">
+          {upcoming.map((u) => {
+            const a = artist(u.artistId);
+            return (
+              <div key={u.id} className="border border-line rounded-xl bg-gradient-to-br from-navy to-coal p-5 relative overflow-hidden">
+                <div className="absolute inset-0 bg-scan opacity-40 pointer-events-none" />
+                <div className="relative">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-[10px] tracking-[0.25em] text-sky font-semibold">{a.name} · {u.kind}</div>
+                      <div className="font-display font-black text-xl uppercase mt-1">{u.title}</div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (window.confirm(`Убрать анонс «${u.title}»?`)) removeUpcoming(u.id);
+                      }}
+                      className="text-paper/30 hover:text-blue border border-line hover:border-blue rounded-lg px-2.5 py-1.5 text-[11px] font-display font-bold transition-all"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="mt-4 scale-75 origin-left"><Countdown date={u.date} /></div>
+                  <div className="mt-3 text-xs text-paper/45">{fmtDate(u.date)} · {u.note}</div>
+                </div>
               </div>
-              <div className="mt-4 text-xs text-paper/45">{fmtDate(upcoming.date)}</div>
-            </>
-          ) : (
-            <div className="text-paper/40 text-sm py-10 text-center">Блок с ближайшим релизом сейчас скрыт.</div>
-          )}
+            );
+          })}
         </div>
+      )}
+      {upcoming.length === 0 && (
+        <div className="border border-dashed border-line rounded-xl p-10 text-center text-paper/40">
+          Анонсов нет — добавьте ближайший релиз TIMUR или INSTASAMKA, и он появится на главной.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================= artist info editor ================= */
+function ArtistTab() {
+  const { artists, saveArtist } = useStore();
+  const [sel, setSel] = useState<ArtistId>("instasamka");
+  const [form, setForm] = useState<Artist | null>(null);
+  const [msg, setMsg] = useState("");
+  const current = form && form.id === sel ? form : artists[sel];
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    saveArtist(current);
+    setMsg("Информация обновлена на всех страницах артиста");
+    setTimeout(() => setMsg(""), 3000);
+  };
+
+  return (
+    <form onSubmit={submit} className="border border-line rounded-xl bg-coal/60 p-6 space-y-4">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="w-5 h-[3px] bg-blue" />
+        <h3 className="font-display font-bold text-sm tracking-wider uppercase">Информация об артисте</h3>
+      </div>
+      <div className="flex gap-2">
+        {(["timur", "instasamka"] as ArtistId[]).map((id) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => {
+              setSel(id);
+              setForm(null);
+            }}
+            className={`${sel === id ? "bg-blue border-blue text-paper" : "border-line text-paper/55 hover:text-paper"} font-display text-[11px] font-bold tracking-wider px-4 py-2.5 rounded-lg border transition-all`}
+          >
+            {artists[id].name}
+          </button>
+        ))}
+      </div>
+      <div className="grid md:grid-cols-2 gap-4">
+        <Field label="Имя / проект">
+          <input value={current.name} onChange={(e) => setForm({ ...current, name: e.target.value })} className={inputCls} />
+        </Field>
+        <Field label="Лейбл">
+          <input value={current.label} onChange={(e) => setForm({ ...current, label: e.target.value })} className={inputCls} />
+        </Field>
+      </div>
+      <Field label="Роль / подпись">
+        <input value={current.role} onChange={(e) => setForm({ ...current, role: e.target.value })} className={inputCls} />
+      </Field>
+      <Field label="Биография">
+        <textarea value={current.bio} onChange={(e) => setForm({ ...current, bio: e.target.value })} rows={6} className={`${inputCls} resize-y leading-relaxed`} />
+      </Field>
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="submit" className={btnPrimary}>СОХРАНИТЬ</button>
+        {msg && <span className={msgCls}>{msg}</span>}
+      </div>
+    </form>
+  );
+}
+
+/* ================= sync & danger zone ================= */
+function SyncTab() {
+  const { online, resetAll, syncMode } = useStore();
+
+  return (
+    <div className="space-y-6">
+      <div className={`relative overflow-hidden border rounded-xl p-6 ${syncMode === "cloud" ? "border-blue/50 bg-gradient-to-br from-navy to-coal" : "border-line bg-coal/60"}`}>
+        <div className="absolute inset-0 bg-scan opacity-40 pointer-events-none" />
+        <div className="relative">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className={`w-2.5 h-2.5 rounded-full ${syncMode === "cloud" ? "bg-blue glow" : "bg-sky"} live-dot`} />
+            <span className="font-display font-bold text-sm tracking-wider uppercase">
+              {syncMode === "cloud" ? "Облачная синхронизация · Supabase" : "Локальный режим · этот браузер"}
+            </span>
+          </div>
+          <p className="mt-3 text-sm text-paper/55 leading-relaxed max-w-2xl">
+            {syncMode === "cloud"
+              ? "Все изменения (треки, релизы, анонсы, новости, прослушивания) мгновенно видны каждому пользователю на любом устройстве. Онлайн-счётчик показывает реальных посетителей площадки прямо сейчас."
+              : "Данные сохраняются в этом браузере и мгновенно синхронизируются между всеми открытыми вкладками. Онлайн-счётчик показывает посетителей этого устройства. Чтобы изменения видели все пользователи на всех устройствах — подключите бесплатный Supabase (инструкция ниже)."}
+          </p>
+          <div className="mt-4 flex flex-wrap gap-6 text-sm">
+            <div>
+              <div className="font-display font-black text-2xl tabular-nums">{online}</div>
+              <div className="text-[10px] tracking-[0.2em] text-paper/40 uppercase mt-1">сейчас на площадке</div>
+            </div>
+            <div>
+              <div className="font-display font-black text-2xl">{syncMode === "cloud" ? "Realtime + Presence" : "BroadcastChannel"}</div>
+              <div className="text-[10px] tracking-[0.2em] text-paper/40 uppercase mt-1">транспорт синхронизации</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {syncMode === "local" && (
+        <div className="border border-line rounded-xl bg-coal/60 p-6">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="w-5 h-[3px] bg-blue" />
+            <h3 className="font-display font-bold text-sm tracking-wider uppercase">Как включить синхронизацию для всех устройств</h3>
+          </div>
+          <ol className="space-y-3 text-sm text-paper/60 leading-relaxed list-none">
+            {[
+              <>Создайте бесплатный проект на <span className="text-sky">supabase.com</span> (тариф Free подходит).</>,
+              <>Откройте SQL Editor и выполните скрипт <span className="text-sky">supabase.sql</span> из корня этого репозитория — он создаст таблицу состояния, политики доступа и realtime-канал.</>,
+              <>Скопируйте URL проекта и ключ <span className="text-sky">anon public key</span> (Settings → API).</>,
+              <>В GitHub: Settings → Secrets → добавьте <span className="text-sky">VITE_SUPABASE_URL</span> и <span className="text-sky">VITE_SUPABASE_ANON_KEY</span>. Workflow сборки подхватит их автоматически.</>,
+              <>Запушьте любой коммит — Pages пересоберётся, и площадка перейдёт в облачный режим: общий контент, живые счётчики и реальный онлайн для всех.</>,
+            ].map((step, i) => (
+              <li key={i} className="flex gap-3">
+                <span className="shrink-0 w-6 h-6 rounded bg-blue/15 border border-blue/40 text-sky font-display font-bold text-xs flex items-center justify-center">{i + 1}</span>
+                <span>{step}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      <div className="border border-line rounded-xl bg-coal/60 p-6">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="w-5 h-[3px] bg-blue" />
+          <h3 className="font-display font-bold text-sm tracking-wider uppercase">Сброс данных</h3>
+        </div>
+        <p className="text-sm text-paper/50 leading-relaxed mb-4">
+          Полностью очищает площадку: треки, релизы, анонсы, новости и счётчики прослушиваний. Изменение сразу увидят все слушатели.
+        </p>
+        <button
+          onClick={() => {
+            if (window.confirm("Точно очистить всю площадку? Отменить это нельзя.")) resetAll();
+          }}
+          className={btnGhost}
+        >
+          ОЧИСТИТЬ ПЛОЩАДКУ
+        </button>
+        <span className="ml-3 text-xs text-paper/35">Пароль администратора: {ADMIN_PASSWORD} (хранится в коде, при желании замените его там)</span>
       </div>
     </div>
   );
 }
 
 /* ================= dashboard ================= */
-type Tab = "tracks" | "releases" | "news" | "upcoming";
+type Tab = "tracks" | "releases" | "upcoming" | "news" | "artists" | "sync";
 
 function Dashboard() {
-  const { tracks, releases, news, upcoming, deleteTrack, deleteRelease, deleteNews, logout, resetDemo } = useStore();
+  const { tracks, releases, news, upcoming, deleteTrack, deleteRelease, deleteNews, logout, playsOf, artists } = useStore();
   const [tab, setTab] = useState<Tab>("tracks");
 
-  const tabs = useMemo(
-    () =>
-      [
-        { id: "tracks" as Tab, label: "ТРЕКИ", count: tracks.length },
-        { id: "releases" as Tab, label: "РЕЛИЗЫ", count: releases.length },
-        { id: "news" as Tab, label: "НОВОСТИ", count: news.length },
-        { id: "upcoming" as Tab, label: "АНОНС", count: upcoming ? 1 : 0 },
-      ],
-    [tracks.length, releases.length, news.length, upcoming]
-  );
+  const tabs: { id: Tab; label: string; count: number }[] = [
+    { id: "tracks", label: "ТРЕКИ", count: tracks.length },
+    { id: "releases", label: "РЕЛИЗЫ", count: releases.length },
+    { id: "upcoming", label: "АНОНСЫ", count: upcoming.length },
+    { id: "news", label: "НОВОСТИ", count: news.length },
+    { id: "artists", label: "АРТИСТЫ", count: 2 },
+    { id: "sync", label: "СИНХРОНИЗАЦИЯ", count: SYNC_MODE === "cloud" ? 1 : 0 },
+  ];
 
   return (
     <div className="max-w-6xl mx-auto px-4 md:px-8 pt-10 md:pt-14">
@@ -479,19 +635,7 @@ function Dashboard() {
           </div>
           <h1 className="font-display text-3xl md:text-5xl font-black uppercase tracking-tight">Админ-панель</h1>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => {
-              if (window.confirm("Сбросить все данные к демо-версии площадки?")) resetDemo();
-            }}
-            className={btnGhost}
-          >
-            СБРОС К ДЕМО
-          </button>
-          <button onClick={logout} className={btnGhost}>
-            ВЫЙТИ
-          </button>
-        </div>
+        <button onClick={logout} className={btnGhost}>ВЫЙТИ</button>
       </div>
 
       <div className="flex flex-wrap gap-2 mb-8">
@@ -519,11 +663,11 @@ function Dashboard() {
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold text-sm truncate">{t.title}</div>
                   <div className="text-xs text-paper/40 truncate">
-                    {ARTISTS[t.artistId].name}
-                    {t.feat && ` feat. ${ARTISTS[t.feat].name}`} · {t.kind === "file" ? "аудиофайл" : `синтез · ${t.bpm} BPM`} · {fmtTime(t.duration)} · {fmtDate(t.addedAt)}
+                    {artists[t.artistId].name}
+                    {t.feat && ` feat. ${artists[t.feat].name}`} · {t.kind === "file" ? "аудиофайл" : `синтез · ${t.bpm} BPM`} · {fmtTime(t.duration)} · {fmtDate(t.addedAt)}
                   </div>
                 </div>
-                <span className="hidden sm:block text-xs text-paper/40 tabular-nums">{t.plays} стримов</span>
+                <span className="hidden sm:block text-xs text-paper/40 tabular-nums">{playsOf(t.id)} {pluralRu(playsOf(t.id), "стрим", "стрима", "стримов")}</span>
                 <button
                   onClick={() => {
                     if (window.confirm(`Удалить трек «${t.title}»?`)) deleteTrack(t.id);
@@ -534,7 +678,7 @@ function Dashboard() {
                 </button>
               </div>
             ))}
-            {!tracks.length && <div className="p-10 text-center text-paper/40">Треков пока нет.</div>}
+            {!tracks.length && <div className="p-10 text-center text-paper/40">Треков пока нет — загрузите первый выше.</div>}
           </div>
         </div>
       )}
@@ -549,9 +693,9 @@ function Dashboard() {
                 <div className="min-w-0 flex-1">
                   <div className="font-display font-bold text-sm uppercase truncate">{r.title}</div>
                   <div className="text-xs text-paper/40">
-                    {ARTISTS[r.artistId].name} · {KIND_LABEL[r.kind]} · {r.year}
+                    {artists[r.artistId].name} · {KIND_LABEL[r.kind]} · {r.year}
                   </div>
-                  <div className="text-xs text-paper/30">{tracks.filter((t) => t.releaseId === r.id).length} треков</div>
+                  <div className="text-xs text-paper/30">{tracks.filter((t) => t.releaseId === r.id).length} {pluralRu(tracks.filter((t) => t.releaseId === r.id).length, "трек", "трека", "треков")}</div>
                 </div>
                 <button
                   onClick={() => {
@@ -563,10 +707,12 @@ function Dashboard() {
                 </button>
               </div>
             ))}
-            {!releases.length && <div className="col-span-full border border-dashed border-line rounded-xl p-10 text-center text-paper/40">Релизов пока нет.</div>}
+            {!releases.length && <div className="col-span-full border border-dashed border-line rounded-xl p-10 text-center text-paper/40">Релизов пока нет — создайте первый выше.</div>}
           </div>
         </div>
       )}
+
+      {tab === "upcoming" && <UpcomingTab />}
 
       {tab === "news" && (
         <div className="space-y-6">
@@ -597,12 +743,14 @@ function Dashboard() {
         </div>
       )}
 
-      {tab === "upcoming" && <UpcomingForm />}
+      {tab === "artists" && <ArtistTab />}
+      {tab === "sync" && <SyncTab />}
 
       <Reveal>
         <div className="mt-10 border border-line rounded-xl bg-coal/40 p-5 text-xs text-paper/35 leading-relaxed">
-          Все изменения сохраняются в браузере площадки и сразу видны слушателям: на главной, в музыке, в треках и на страницах артистов.
+          Все изменения сохраняются и сразу видны слушателям: на главной, в музыке, в треках и на страницах артистов.
           Аудиофайлы хранятся локально (IndexedDB), синтезированные треки генерируются звуковым движком TimurSounds в реальном времени.
+          Счётчики прослушиваний и онлайна — настоящие: они растут только от реальных действий слушателей.
         </div>
       </Reveal>
     </div>

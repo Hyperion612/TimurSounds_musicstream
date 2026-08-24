@@ -8,7 +8,6 @@ export interface Artist {
   label: string;
   role: string;
   bio: string;
-  listeners: number;
 }
 
 export interface Release {
@@ -30,7 +29,6 @@ export interface Track {
   bpm: number;
   seed: number;
   kind: "synth" | "file";
-  plays: number;
   addedAt: number;
 }
 
@@ -43,6 +41,7 @@ export interface NewsItem {
 }
 
 export interface Upcoming {
+  id: string;
   title: string;
   kind: string;
   artistId: ArtistId;
@@ -50,108 +49,45 @@ export interface Upcoming {
   note: string;
 }
 
-export const ARTISTS: Record<ArtistId, Artist> = {
+export interface State {
+  v: number;
+  artists: Record<ArtistId, Artist>;
+  tracks: Track[];
+  releases: Release[];
+  news: NewsItem[];
+  upcoming: Upcoming[];
+  plays: Record<string, number>;
+}
+
+export const STATE_VERSION = 1;
+
+export const DEFAULT_ARTISTS: Record<ArtistId, Artist> = {
   timur: {
     id: "timur",
     name: "TIMUR",
     label: "TimurSounds",
     role: "саунд-продюсер · основатель TimurSounds",
     bio: "Основатель лейбла TimurSounds. Пишет холодную электронику на стыке техно, фонка и синтвейва: ночные пульсации, аналоговые басы и сигналы из глубины города. Каждый трек на площадке спродюсирован им лично.",
-    listeners: 1284502,
   },
   instasamka: {
     id: "instasamka",
     name: "INSTASAMKA",
     label: "NaMneCash Music",
     role: "певица · NaMneCash Music",
-    bio: "Певица лейбла NaMneCash Music. Дерзкий поп-рэп, блеск и максимальная громкость. На TimurSounds представлена официальная страница с синглами и коллаборацией с TIMUR.",
-    listeners: 3876114,
+    bio: "Российская поп- и рэп-исполнительница, блогер. Изначально получила известность как инстаблогер с провокационным контентом, а затем — как музыкальная артистка; к началу 2020-х стала одним из заметных имён российского стримингового мейнстрима. Поворотными для её музыкальной карьеры стали релизы Moneydealer и Popstar, а песни «Lipsi Ha» и «За деньги да» достигали высоких позиций в чартах и на стриминговых платформах.",
   },
 };
 
-export const artistName = (id: ArtistId) => ARTISTS[id].name;
-
-const D = 86400000;
-
-export function seedDB() {
-  const now = Date.now();
-
-  const releases: Release[] = [
-    { id: "r1", title: "NOCTURNE", artistId: "timur", kind: "album", year: 2025, coverSeed: 11 },
-    { id: "r2", title: "MIDNIGHT TAPE", artistId: "timur", kind: "ep", year: 2025, coverSeed: 27 },
-    { id: "r3", title: "COLD CIRCUIT", artistId: "timur", kind: "single", year: 2024, coverSeed: 43 },
-    { id: "r4", title: "ГРАВИТАЦИЯ", artistId: "timur", kind: "single", year: 2024, coverSeed: 58 },
-    { id: "r5", title: "ЗОЛОТО", artistId: "instasamka", kind: "single", year: 2025, coverSeed: 71 },
-    { id: "r6", title: "ДРАМА", artistId: "instasamka", kind: "single", year: 2024, coverSeed: 83 },
-    { id: "r7", title: "POPSTAR", artistId: "instasamka", kind: "single", year: 2024, coverSeed: 96 },
-    { id: "r8", title: "ХОЛОД", artistId: "instasamka", kind: "single", year: 2025, coverSeed: 108 },
-  ];
-
-  const tracks: Track[] = [
-    { id: "t1", title: "ИМПУЛЬС", artistId: "timur", releaseId: "r1", duration: 184, bpm: 124, seed: 101, kind: "synth", plays: 48211, addedAt: now - 6 * D },
-    { id: "t2", title: "СИНИЙ КОД", artistId: "timur", releaseId: "r1", duration: 172, bpm: 128, seed: 202, kind: "synth", plays: 61043, addedAt: now - 6 * D },
-    { id: "t3", title: "03:00", artistId: "timur", releaseId: "r1", duration: 201, bpm: 96, seed: 303, kind: "synth", plays: 39980, addedAt: now - 6 * D },
-    { id: "t4", title: "НЕОН", artistId: "timur", releaseId: "r1", duration: 165, bpm: 122, seed: 404, kind: "synth", plays: 27415, addedAt: now - 6 * D },
-    { id: "t5", title: "ХРУСТАЛЬ", artistId: "timur", releaseId: "r1", duration: 190, bpm: 104, seed: 505, kind: "synth", plays: 21330, addedAt: now - 6 * D },
-    { id: "t6", title: "ПОЛУНОЧНЫЙ", artistId: "timur", releaseId: "r2", duration: 178, bpm: 118, seed: 606, kind: "synth", plays: 18902, addedAt: now - 20 * D },
-    { id: "t7", title: "КАССЕТА", artistId: "timur", releaseId: "r2", duration: 161, bpm: 132, seed: 707, kind: "synth", plays: 15210, addedAt: now - 20 * D },
-    { id: "t8", title: "СНЫ В 4K", artistId: "timur", releaseId: "r2", duration: 185, bpm: 100, seed: 808, kind: "synth", plays: 12754, addedAt: now - 20 * D },
-    { id: "t9", title: "COLD CIRCUIT", artistId: "timur", releaseId: "r3", duration: 169, bpm: 126, seed: 909, kind: "synth", plays: 30112, addedAt: now - 90 * D },
-    { id: "t10", title: "ГРАВИТАЦИЯ", artistId: "timur", releaseId: "r4", duration: 192, bpm: 110, seed: 111, kind: "synth", plays: 26887, addedAt: now - 120 * D },
-    { id: "t11", title: "ЗОЛОТО", artistId: "instasamka", releaseId: "r5", duration: 164, bpm: 120, seed: 121, kind: "synth", plays: 88431, addedAt: now - 4 * D },
-    { id: "t12", title: "ДРАМА", artistId: "instasamka", releaseId: "r6", duration: 158, bpm: 124, seed: 131, kind: "synth", plays: 64209, addedAt: now - 60 * D },
-    { id: "t13", title: "POPSTAR", artistId: "instasamka", releaseId: "r7", duration: 176, bpm: 118, seed: 141, kind: "synth", plays: 71508, addedAt: now - 80 * D },
-    { id: "t14", title: "ХОЛОД", artistId: "instasamka", feat: "timur", releaseId: "r8", duration: 181, bpm: 112, seed: 151, kind: "synth", plays: 96344, addedAt: now - 2 * D },
-  ];
-
-  const news: NewsItem[] = [
-    {
-      id: "n1",
-      tag: "релиз",
-      title: "Коллаборация TIMUR × INSTASAMKA — трек «ХОЛОД» уже на площадке",
-      body: "Совместный сингл лейблов TimurSounds и NaMneCash Music. Продюсерский бит TIMUR и вокал INSTASAMKA — самое горячее, что выходило на площадке этой зимой. Слушайте в разделе треков.",
-      date: now - 2 * D,
-    },
-    {
-      id: "n2",
-      tag: "событие",
-      title: "INSTASAMKA получила официальную страницу на TimurSounds",
-      body: "По договорённости с лейблом NaMneCash Music на платформе открыта страница артистки: синглы «ЗОЛОТО», «ДРАМА», «POPSTAR» и новый «ХОЛОД». Раздел «Музыка» обновлён.",
-      date: now - 4 * D,
-    },
-    {
-      id: "n3",
-      tag: "релиз",
-      title: "Альбом NOCTURNE полностью доступен для прослушивания",
-      body: "Пять ночных треков от TIMUR: «ИМПУЛЬС», «СИНИЙ КОД», «03:00», «НЕОН» и «ХРУСТАЛЬ». Альбом сведён в единый звуковой код — слушайте подряд, как задумано продюсером.",
-      date: now - 6 * D,
-    },
-    {
-      id: "n4",
-      tag: "обновление",
-      title: "Обновление платформы: плеер, страницы артистов, лента новостей",
-      body: "Запущена новая версия TimurSounds. Постоянный плеер внизу экрана, очереди воспроизведения, страницы TIMUR и INSTASAMKA, а также эта лента — новости пишет администратор площадки.",
-      date: now - 9 * D,
-    },
-  ];
-
-  const upcoming: Upcoming = {
-    title: "СИНИЙ КОД: DELUXE",
-    kind: "альбом",
-    artistId: "timur",
-    date: now + 12 * D + 7 * 3600000,
-    note: "Расширенное издание альбома NOCTURNE: три новых трека, инструменталы и ремикс от гостей лейбла. Премьера ровно в 00:00 по МСК.",
+export function emptyState(): State {
+  return {
+    v: STATE_VERSION,
+    artists: JSON.parse(JSON.stringify(DEFAULT_ARTISTS)) as Record<ArtistId, Artist>,
+    tracks: [],
+    releases: [],
+    news: [],
+    upcoming: [],
+    plays: {},
   };
-
-  return { v: 3, tracks, releases, news, upcoming };
-}
-
-export interface DB {
-  v: number;
-  tracks: Track[];
-  releases: Release[];
-  news: NewsItem[];
-  upcoming: Upcoming | null;
 }
 
 export function fmtTime(sec: number) {
@@ -167,6 +103,14 @@ export function fmtNum(n: number) {
   if (n >= 1000000) return (n / 1000000).toFixed(1).replace(".", ",") + " млн";
   if (n >= 1000) return (n / 1000).toFixed(1).replace(".", ",") + " тыс";
   return String(n);
+}
+
+export function pluralRu(n: number, one: string, few: string, many: string) {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
 }
 
 export const KIND_LABEL: Record<ReleaseKind, string> = {

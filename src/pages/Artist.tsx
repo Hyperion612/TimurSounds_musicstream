@@ -1,5 +1,5 @@
 import { Link, useParams } from "react-router-dom";
-import { ARTISTS, fmtNum } from "../lib/data";
+import { fmtNum, pluralRu } from "../lib/data";
 import type { ArtistId } from "../lib/data";
 import { usePlayer } from "../lib/player";
 import { useStore } from "../lib/store";
@@ -8,13 +8,13 @@ import { PlayIcon, ReleaseCard, TrackRow } from "../components/cards";
 
 export function ArtistPage() {
   const { id } = useParams();
-  const { tracks, releases } = useStore();
+  const { tracks, releases, artistPlays, artist, playsOf } = useStore();
   const { playTrack } = usePlayer();
 
   const artistId = (id === "timur" || id === "instasamka" ? id : undefined) as ArtistId | undefined;
-  const artist = artistId ? ARTISTS[artistId] : undefined;
+  const a = artistId ? artist(artistId) : undefined;
 
-  if (!artist || !artistId) {
+  if (!a || !artistId) {
     return (
       <div className="max-w-3xl mx-auto px-4 pt-24 text-center">
         <div className="font-display font-black text-5xl text-blue mb-4">404</div>
@@ -26,10 +26,10 @@ export function ArtistPage() {
 
   const artistTracks = [...tracks]
     .filter((t) => t.artistId === artistId || t.feat === artistId)
-    .sort((a, b) => b.plays - a.plays);
+    .sort((x, y) => playsOf(y.id) - playsOf(x.id) || y.addedAt - x.addedAt);
   const queue = artistTracks.map((t) => t.id);
-  const artistReleases = releases.filter((r) => r.artistId === artistId).sort((a, b) => b.year - a.year);
-  const totalPlays = artistTracks.reduce((s, t) => s + t.plays, 0);
+  const artistReleases = releases.filter((r) => r.artistId === artistId).sort((x, y) => y.year - x.year);
+  const totalPlays = artistPlays(artistId);
   const isMain = artistId === "timur";
 
   return (
@@ -50,12 +50,12 @@ export function ArtistPage() {
           <Reveal delay={100}>
             <div>
               <div className="flex flex-wrap items-center gap-3 mb-4">
-                <span className="text-[10px] tracking-[0.3em] text-sky font-semibold border border-line rounded-full px-3 py-1.5 bg-coal/70">{artist.label.toUpperCase()}</span>
+                <span className="text-[10px] tracking-[0.3em] text-sky font-semibold border border-line rounded-full px-3 py-1.5 bg-coal/70">{a.label.toUpperCase()}</span>
                 <span className="flex items-center gap-2 text-xs text-paper/50"><span className="w-1.5 h-1.5 rounded-full bg-blue live-dot" />на площадке</span>
               </div>
-              <h1 className="font-display font-black text-5xl md:text-7xl uppercase tracking-tight leading-none">{artist.name}</h1>
-              <p className="mt-3 text-paper/55 text-sm md:text-base">{artist.role}</p>
-              <p className="mt-4 max-w-2xl text-paper/60 leading-relaxed text-sm md:text-[15px]">{artist.bio}</p>
+              <h1 className="font-display font-black text-5xl md:text-7xl uppercase tracking-tight leading-none">{a.name}</h1>
+              <p className="mt-3 text-paper/55 text-sm md:text-base">{a.role}</p>
+              <p className="mt-4 max-w-2xl text-paper/60 leading-relaxed text-sm md:text-[15px]">{a.bio}</p>
               <div className="mt-6 flex flex-wrap items-center gap-6">
                 <button
                   onClick={() => artistTracks[0] && playTrack(artistTracks[0].id, queue)}
@@ -67,16 +67,16 @@ export function ArtistPage() {
                 </button>
                 <div className="flex gap-6">
                   <div>
-                    <div className="font-display font-bold text-xl"><CountUp to={artist.listeners} /></div>
-                    <div className="text-[10px] tracking-[0.2em] text-paper/40 uppercase mt-1">слушателей / мес</div>
-                  </div>
-                  <div>
                     <div className="font-display font-bold text-xl"><CountUp to={totalPlays} /></div>
-                    <div className="text-[10px] tracking-[0.2em] text-paper/40 uppercase mt-1">прослушиваний</div>
+                    <div className="text-[10px] tracking-[0.2em] text-paper/40 uppercase mt-1">{pluralRu(totalPlays, "прослушивание", "прослушивания", "прослушиваний")}</div>
                   </div>
                   <div>
                     <div className="font-display font-bold text-xl">{artistTracks.length}</div>
-                    <div className="text-[10px] tracking-[0.2em] text-paper/40 uppercase mt-1">треков</div>
+                    <div className="text-[10px] tracking-[0.2em] text-paper/40 uppercase mt-1">{pluralRu(artistTracks.length, "трек", "трека", "треков")}</div>
+                  </div>
+                  <div>
+                    <div className="font-display font-bold text-xl">{artistReleases.length}</div>
+                    <div className="text-[10px] tracking-[0.2em] text-paper/40 uppercase mt-1">{pluralRu(artistReleases.length, "релиз", "релиза", "релизов")}</div>
                   </div>
                 </div>
               </div>
@@ -89,21 +89,26 @@ export function ArtistPage() {
         {/* popular tracks */}
         <SectionHead kicker="Самое громкое" title="Популярные треки" />
         <Reveal>
-          <div className="border border-line rounded-xl bg-coal/40 p-2 md:p-3 divide-y divide-line/60">
-            <div className="hidden md:grid grid-cols-[2.25rem_minmax(0,1fr)_minmax(0,11rem)_5rem_3.5rem_2rem] gap-3 px-3 pb-2 text-[10px] tracking-[0.25em] text-paper/30 font-semibold">
-              <span className="text-center">#</span>
-              <span>ТРЕК</span>
-              <span>РЕЛИЗ</span>
-              <span className="text-right">ПЛЕИ</span>
-              <span className="text-right">ВРЕМЯ</span>
-              <span />
+          {artistTracks.length ? (
+            <div className="border border-line rounded-xl bg-coal/40 p-2 md:p-3 divide-y divide-line/60">
+              <div className="hidden md:grid grid-cols-[2.25rem_minmax(0,1fr)_minmax(0,11rem)_5rem_3.5rem_2rem] gap-3 px-3 pb-2 text-[10px] tracking-[0.25em] text-paper/30 font-semibold">
+                <span className="text-center">#</span>
+                <span>ТРЕК</span>
+                <span>РЕЛИЗ</span>
+                <span className="text-right">ПЛЕИ</span>
+                <span className="text-right">ВРЕМЯ</span>
+                <span />
+              </div>
+              {artistTracks.map((t, i) => <TrackRow key={t.id} track={t} index={i} queue={queue} />)}
             </div>
-            {artistTracks.length ? (
-              artistTracks.map((t, i) => <TrackRow key={t.id} track={t} index={i} queue={queue} />)
-            ) : (
-              <div className="p-10 text-center text-paper/40">Треки скоро появятся.</div>
-            )}
-          </div>
+          ) : (
+            <div className="border border-dashed border-line rounded-xl p-12 text-center bg-coal/30">
+              <div className="font-display font-bold text-xl uppercase text-paper/60">Треков пока нет</div>
+              <p className="mt-2 text-paper/40 text-sm max-w-md mx-auto">
+                Администратор загрузит {pluralRu(0, "первый трек", "первые треки", "первые треки")} {a.name} — и они сразу появятся здесь.
+              </p>
+            </div>
+          )}
         </Reveal>
 
         {/* releases */}
@@ -112,8 +117,8 @@ export function ArtistPage() {
             kicker="Дискография"
             title="Релизы"
             action={
-              <span className="text-xs text-paper/40 border border-line rounded-full px-3 py-1.5">
-                {artistReleases.length} · суммарно {fmtNum(totalPlays)} стримов
+              <span className="text-xs text-paper/40 border border-line rounded-full px-3 py-1.5 tabular-nums">
+                {artistReleases.length} · суммарно {fmtNum(totalPlays)} {pluralRu(totalPlays, "стрим", "стрима", "стримов")}
               </span>
             }
           />
@@ -126,7 +131,10 @@ export function ArtistPage() {
               ))}
             </div>
           ) : (
-            <div className="border border-dashed border-line rounded-xl p-12 text-center text-paper/40">Релизы скоро будут добавлены администратором.</div>
+            <div className="border border-dashed border-line rounded-xl p-12 text-center bg-coal/30">
+              <div className="font-display font-bold text-xl uppercase text-paper/60">Релизы скоро будут</div>
+              <p className="mt-2 text-paper/40 text-sm">Администратор создаёт релизы в админ-панели — они появятся здесь у всех слушателей.</p>
+            </div>
           )}
         </div>
       </div>

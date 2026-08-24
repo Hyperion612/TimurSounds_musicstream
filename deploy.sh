@@ -7,6 +7,12 @@
 #   2. В репозитории: Settings → Pages → Source: Deploy from a branch → gh-pages / (root)
 #
 # Требуется git и доступ к remote origin.
+#
+# Облачная синхронизация (необязательно): создайте файл .env.local рядом с
+# package.json и пропишите в нём:
+#   VITE_SUPABASE_URL=https://xxxx.supabase.co
+#   VITE_SUPABASE_ANON_KEY=eyJ...
+# Vite подхватит их при сборке автоматически (см. supabase.sql).
 
 set -e
 

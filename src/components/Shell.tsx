@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useEffect } from "react";
-import { ARTISTS } from "../lib/data";
+import { pluralRu } from "../lib/data";
+import { useStore } from "../lib/store";
 import { PlayerBar } from "./PlayerBar";
 
 function Logo() {
@@ -49,6 +50,7 @@ function Icon({ name }: { name: string }) {
 
 export function Shell() {
   const loc = useLocation();
+  const { artist, online, syncMode } = useStore();
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, [loc.pathname]);
@@ -74,12 +76,12 @@ export function Shell() {
             <div className="space-y-1">
               <NavLink to="/artist/timur" className={navCls}>
                 <span className="w-4.5 h-4.5 rounded bg-blue text-paper font-display font-black text-[10px] flex items-center justify-center">T</span>
-                {ARTISTS.timur.name}
+                {artist("timur").name}
                 <span className="ml-auto text-[9px] tracking-widest text-sky/70 border border-line rounded px-1 py-px">ЛЕЙБЛ</span>
               </NavLink>
               <NavLink to="/artist/instasamka" className={navCls}>
                 <span className="w-4.5 h-4.5 rounded bg-paper text-ink font-display font-black text-[8px] flex items-center justify-center">IS</span>
-                {ARTISTS.instasamka.name}
+                {artist("instasamka").name}
               </NavLink>
             </div>
           </div>

@@ -31,9 +31,14 @@ jobs:
         run: npm ci
 
       # --base=./ — относительные пути, чтобы ассеты находились
-      # на username.github.io/repo-name/, а не в корне домена
+      # на username.github.io/repo-name/, а не в корне домена.
+      # Секреты Supabase (необязательны): если заданы, площадка собирается
+      # с облачной синхронизацией — изменения видны всем устройствам.
       - name: Build
         run: npm run build -- --base=./
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

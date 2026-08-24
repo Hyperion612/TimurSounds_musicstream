@@ -1,5 +1,5 @@
 import { Link, useParams } from "react-router-dom";
-import { ARTISTS, KIND_LABEL, fmtNum } from "../lib/data";
+import { KIND_LABEL, fmtNum, pluralRu } from "../lib/data";
 import { usePlayer } from "../lib/player";
 import { useStore } from "../lib/store";
 import { Cover, Reveal } from "../components/ui";
@@ -7,7 +7,7 @@ import { PlayIcon, TrackRow } from "../components/cards";
 
 export function ReleasePage() {
   const { id } = useParams();
-  const { getRelease, tracks } = useStore();
+  const { getRelease, tracks, playsOf, artist } = useStore();
   const { playTrack } = usePlayer();
   const rel = id ? getRelease(id) : undefined;
 
@@ -23,8 +23,8 @@ export function ReleasePage() {
 
   const relTracks = tracks.filter((t) => t.releaseId === rel.id);
   const queue = relTracks.map((t) => t.id);
-  const artist = ARTISTS[rel.artistId];
-  const totalPlays = relTracks.reduce((s, t) => s + t.plays, 0);
+  const a = artist(rel.artistId);
+  const totalPlays = relTracks.reduce((s, t) => s + playsOf(t.id), 0);
 
   return (
     <div className="max-w-6xl mx-auto px-4 md:px-8 pt-10 md:pt-14">
@@ -48,13 +48,13 @@ export function ReleasePage() {
               <span className="text-[10px] font-display font-bold tracking-[0.25em] bg-blue text-paper px-2.5 py-1 rounded">{KIND_LABEL[rel.kind]}</span>
               <h1 className="font-display font-black text-4xl md:text-6xl uppercase tracking-tight mt-4">{rel.title}</h1>
               <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-paper/55">
-                <Link to={`/artist/${rel.artistId}`} className="text-paper font-semibold hover:text-bluehi transition-colors">{artist.name}</Link>
+                <Link to={`/artist/${rel.artistId}`} className="text-paper font-semibold hover:text-bluehi transition-colors">{a.name}</Link>
                 <span>·</span>
                 <span>{rel.year}</span>
                 <span>·</span>
-                <span>{relTracks.length} трек{relTracks.length === 1 ? "" : relTracks.length < 5 ? "а" : "ов"}</span>
+                <span>{relTracks.length} {pluralRu(relTracks.length, "трек", "трека", "треков")}</span>
                 <span>·</span>
-                <span className="tabular-nums">{fmtNum(totalPlays)} прослушиваний</span>
+                <span className="tabular-nums">{fmtNum(totalPlays)} {pluralRu(totalPlays, "прослушивание", "прослушивания", "прослушиваний")}</span>
               </div>
               <div className="mt-6 flex flex-wrap gap-3">
                 <button
@@ -89,7 +89,7 @@ export function ReleasePage() {
           {relTracks.length ? (
             relTracks.map((t, i) => <TrackRow key={t.id} track={t} index={i} queue={queue} showRelease={false} />)
           ) : (
-            <div className="p-10 text-center text-paper/40">Треки этого релиза скоро появятся — администратор уже загружает их.</div>
+            <div className="p-10 text-center text-paper/40">Треки этого релиза скоро появятся — администратор загружает их в админ-панели.</div>
           )}
         </div>
       </Reveal>
