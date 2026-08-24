@@ -34,7 +34,7 @@ export function PlayerBar() {
           {track ? (
             <>
               <div className="relative shrink-0">
-                <Cover seed={track.seed} title={track.title} className={`w-11 h-11 lg:w-12 lg:h-12 rounded-md border border-line ${playing ? "glow" : ""}`} />
+                <Cover seed={track.seed} title={track.title} cover={track.cover} className={`w-11 h-11 lg:w-12 lg:h-12 rounded-md border border-line ${playing ? "glow" : ""}`} />
               </div>
               <div className="min-w-0">
                 <div className="font-semibold text-sm truncate leading-tight">{track.title}</div>

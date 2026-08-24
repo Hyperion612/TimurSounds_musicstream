@@ -3,7 +3,7 @@ import { fmtNum, pluralRu } from "../lib/data";
 import type { ArtistId } from "../lib/data";
 import { useStore } from "../lib/store";
 import { Reveal } from "../components/ui";
-import { TrackRow } from "../components/cards";
+import { TRACK_GRID, TrackRow } from "../components/cards";
 
 export function Tracks() {
   const { tracks, playsOf, artist } = useStore();
@@ -80,7 +80,7 @@ export function Tracks() {
       <Reveal delay={160}>
         {filtered.length ? (
           <div className="border border-line rounded-xl bg-coal/40 p-2 md:p-3 divide-y divide-line/60">
-            <div className="hidden md:grid grid-cols-[2.25rem_minmax(0,1fr)_minmax(0,11rem)_5rem_3.5rem_2rem] gap-3 px-3 pb-2 text-[10px] tracking-[0.25em] text-paper/30 font-semibold">
+            <div className={`hidden md:grid ${TRACK_GRID} gap-3 px-3 pb-2 text-[10px] tracking-[0.25em] text-paper/30 font-semibold`}>
               <span className="text-center">#</span>
               <span>ТРЕК</span>
               <span>РЕЛИЗ</span>

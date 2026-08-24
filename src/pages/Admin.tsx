@@ -1,30 +1,34 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { KIND_LABEL, fmtDate, fmtTime, pluralRu } from "../lib/data";
 import type { Artist, ArtistId, NewsTag, ReleaseKind, Track } from "../lib/data";
 import { SynthSource } from "../lib/audio";
 import { putAudio } from "../lib/db";
-import { ADMIN_PASSWORD, useStore } from "../lib/store";
-import { SYNC_MODE } from "../lib/sync";
+import { imageToCoverDataUrl, readAudioMeta } from "../lib/media";
+import { DEFAULT_ADMIN_PASSWORD, useStore } from "../lib/store";
+import { configureCloud, disconnectCloud, testCloud } from "../lib/sync";
 import { Countdown, Cover, Reveal } from "../components/ui";
 import { PauseIcon, PlayIcon } from "../components/cards";
-import { useRef } from "react";
 
 /* ================= login ================= */
 function Login() {
   const { login } = useStore();
   const [pw, setPw] = useState("");
   const [err, setErr] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const submit = (e: FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!login(pw)) {
+    if (busy) return;
+    setBusy(true);
+    const ok = await login(pw);
+    setBusy(false);
+    if (!ok) {
       setErr(true);
       setPw("");
       setTimeout(() => setErr(false), 450);
     }
   };
-
   return (
     <div className="min-h-[70vh] flex items-center justify-center px-4">
       <div className={`w-full max-w-md border border-line rounded-2xl bg-coal p-8 md:p-10 relative overflow-hidden ${err ? "shake" : ""}`}>
@@ -39,7 +43,7 @@ function Login() {
           </div>
           <h1 className="font-display font-black text-2xl uppercase tracking-tight">Админ-панель</h1>
           <p className="text-sm text-paper/50 mt-2 leading-relaxed">
-            Доступ только для владельца площадки TimurSounds. Введите пароль, чтобы управлять треками, релизами, анонсами и новостями.
+            Доступ только для владельца площадки TimurSounds. Пароль хранится в общем состоянии площадки и действует на всех устройствах.
           </p>
           <form onSubmit={submit} className="mt-6 space-y-3">
             <input
@@ -51,10 +55,17 @@ function Login() {
               className="w-full bg-ink border border-line focus:border-blue outline-none rounded-lg px-4 py-3.5 text-sm placeholder:text-paper/30 transition-colors"
             />
             {err && <div className="text-xs text-sky border border-blue/40 bg-blue/10 rounded-lg px-3 py-2">Неверный пароль. Попробуйте ещё раз.</div>}
-            <button type="submit" className="w-full bg-blue hover:bg-bluehi text-paper font-display font-bold text-sm tracking-wider py-3.5 rounded-lg transition-all hover:-translate-y-0.5 active:scale-[0.98]">
-              ВОЙТИ
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full bg-blue hover:bg-bluehi disabled:opacity-50 text-paper font-display font-bold text-sm tracking-wider py-3.5 rounded-lg transition-all hover:-translate-y-0.5 active:scale-[0.98]"
+            >
+              {busy ? "ПРОВЕРКА…" : "ВОЙТИ"}
             </button>
           </form>
+          <p className="mt-4 text-[11px] text-paper/35">
+            Стартовый пароль — <span className="text-sky">{DEFAULT_ADMIN_PASSWORD}</span> (если вы его ещё не меняли во вкладке «Доступ»).
+          </p>
         </div>
       </div>
     </div>
@@ -69,6 +80,8 @@ const btnPrimary =
   "bg-blue hover:bg-bluehi text-paper font-display font-bold text-xs tracking-wider px-5 py-3 rounded-lg transition-all hover:-translate-y-0.5 active:scale-95 disabled:opacity-40";
 const btnGhost =
   "border border-line hover:border-bluehi text-paper/70 hover:text-paper font-display font-bold text-xs tracking-wider px-5 py-3 rounded-lg transition-all hover:-translate-y-0.5";
+const btnSmall =
+  "border border-line hover:border-bluehi text-paper/60 hover:text-paper font-display font-bold text-[10px] tracking-wider px-3 py-2 rounded-lg transition-all";
 const msgCls = "text-xs text-sky border border-blue/40 bg-blue/10 rounded-lg px-3 py-2";
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -90,6 +103,75 @@ function ArtistSelect({ value, onChange }: { value: ArtistId; onChange: (v: Arti
   );
 }
 
+/* ================= cover picker ================= */
+function CoverPicker({
+  seed,
+  title,
+  cover,
+  onCover,
+  metaBlob,
+  metaFound,
+}: {
+  seed: number;
+  title: string;
+  cover?: string;
+  onCover: (c: string | undefined) => void;
+  metaBlob?: Blob | null;
+  metaFound?: boolean;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  const fromFile = async (f: File | null) => {
+    if (!f) return;
+    setBusy(true);
+    try {
+      onCover(await imageToCoverDataUrl(f));
+    } catch {
+      /* не изображение */
+    }
+    setBusy(false);
+  };
+
+  const fromMeta = async () => {
+    if (!metaBlob) return;
+    setBusy(true);
+    try {
+      onCover(await imageToCoverDataUrl(metaBlob));
+    } catch {
+      /* ignore */
+    }
+    setBusy(false);
+  };
+
+  return (
+    <div className="border border-line rounded-xl p-4 flex flex-wrap items-center gap-4 bg-ink/40">
+      <Cover seed={seed} title={title || "T"} cover={cover} className="w-16 h-16 rounded-lg border border-line shrink-0" />
+      <div className="flex-1 min-w-[180px]">
+        <span className={labelCls}>Обложка</span>
+        <div className="text-xs text-paper/45 leading-relaxed">
+          {cover ? "Своя обложка — её увидят все слушатели" : "Будет использована генеративная обложка TimurSounds"}
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <label className={`${btnSmall} cursor-pointer inline-flex items-center`}>
+          {busy ? "ОБРАБОТКА…" : "ЗАГРУЗИТЬ ФОТО"}
+          <input type="file" accept="image/*" className="hidden" onChange={(e) => void fromFile(e.target.files?.[0] ?? null)} />
+        </label>
+        {metaFound && !cover && (
+          <button type="button" onClick={() => void fromMeta()} className={`${btnSmall} border-blue/50 text-sky`}>
+            ВЗЯТЬ ИЗ МЕТАДАННЫХ
+          </button>
+        )}
+        {cover && (
+          <button type="button" onClick={() => onCover(undefined)} className={btnSmall}>
+            СБРОСИТЬ
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ================= track form ================= */
 function TrackForm() {
   const { releases, addTrack, artists } = useStore();
@@ -103,6 +185,11 @@ function TrackForm() {
   const [duration, setDuration] = useState(175);
   const [file, setFile] = useState<File | null>(null);
   const [fileDur, setFileDur] = useState<number | null>(null);
+  const [cover, setCover] = useState<string | undefined>();
+  const [metaFound, setMetaFound] = useState(false);
+  const [metaInfo, setMetaInfo] = useState<string>("");
+  const [reading, setReading] = useState(false);
+  const metaBlobRef = useRef<Blob | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [previewing, setPreviewing] = useState(false);
@@ -111,6 +198,9 @@ function TrackForm() {
   const onFile = (f: File | null) => {
     setFile(f);
     setFileDur(null);
+    setMetaFound(false);
+    setMetaInfo("");
+    metaBlobRef.current = null;
     if (!f) return;
     const url = URL.createObjectURL(f);
     const a = new Audio();
@@ -120,6 +210,28 @@ function TrackForm() {
       URL.revokeObjectURL(url);
     };
     a.src = url;
+    // читаем теги: название, артиста и встроенную обложку (APIC)
+    setReading(true);
+    void (async () => {
+      const m = await readAudioMeta(f);
+      metaBlobRef.current = m.cover ?? null;
+      setMetaFound(!!m.cover);
+      const bits: string[] = [];
+      if (m.title) bits.push(`«${m.title}»`);
+      if (m.artist) bits.push(m.artist);
+      if (m.cover) bits.push("обложка найдена");
+      setMetaInfo(bits.length ? `В метаданных: ${bits.join(" · ")}` : "Теги ID3 в файле не найдены");
+      if (m.cover) {
+        try {
+          setCover(await imageToCoverDataUrl(m.cover));
+        } catch {
+          /* ignore */
+        }
+      }
+      const tagTitle = m.title;
+      if (tagTitle) setTitle((prev) => (prev.trim() ? prev : tagTitle.trim().toUpperCase()));
+      setReading(false);
+    })();
   };
 
   const preview = () => {
@@ -160,12 +272,17 @@ function TrackForm() {
         seed,
         kind: mode === "file" && file ? "file" : "synth",
         addedAt: Date.now(),
+        cover,
       };
       addTrack(t);
       setMsg(`Трек «${t.title}» опубликован — у всех слушателей`);
       setTitle("");
       setFile(null);
       setFileDur(null);
+      setCover(undefined);
+      setMetaFound(false);
+      setMetaInfo("");
+      metaBlobRef.current = null;
       setSeed(Math.floor(Math.random() * 9000) + 1000);
     } catch {
       setMsg("Не удалось сохранить аудиофайл — попробуйте файл поменьше");
@@ -244,11 +361,15 @@ function TrackForm() {
             </svg>
             <span className="text-sm text-paper/60">{file ? file.name : "Нажмите, чтобы выбрать аудиофайл (MP3 / WAV / OGG)"}</span>
             {fileDur && <span className="text-xs text-sky tabular-nums">длительность: {fmtTime(fileDur)}</span>}
+            {reading && <span className="text-xs text-sky">Читаем метаданные…</span>}
+            {!reading && metaInfo && <span className="text-xs text-paper/40">{metaInfo}</span>}
             <input type="file" accept="audio/*" className="hidden" onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
           </label>
           {!file && <p className="text-xs text-paper/35">Если файл не выбран, трек будет опубликован со звуком синтеза TimurSounds.</p>}
         </div>
       )}
+
+      <CoverPicker seed={seed} title={title} cover={cover} onCover={setCover} metaBlob={metaBlobRef.current} metaFound={metaFound} />
 
       <div className="flex flex-wrap items-center gap-3 pt-1">
         <button type="submit" disabled={busy || !title.trim()} className={btnPrimary}>
@@ -267,6 +388,8 @@ function ReleaseForm() {
   const [artistId, setArtistId] = useState<ArtistId>("timur");
   const [kind, setKind] = useState<ReleaseKind>("single");
   const [year, setYear] = useState(new Date().getFullYear());
+  const [coverSeed, setCoverSeed] = useState(() => Math.floor(Math.random() * 500) + 200);
+  const [cover, setCover] = useState<string | undefined>();
   const [msg, setMsg] = useState("");
 
   const submit = (e: FormEvent) => {
@@ -278,10 +401,13 @@ function ReleaseForm() {
       artistId,
       kind,
       year,
-      coverSeed: Math.floor(Math.random() * 500) + 200,
+      coverSeed,
+      cover,
     });
     setMsg(`Релиз «${title.trim().toUpperCase()}» создан`);
     setTitle("");
+    setCover(undefined);
+    setCoverSeed(Math.floor(Math.random() * 500) + 200);
     setTimeout(() => setMsg(""), 3000);
   };
 
@@ -308,10 +434,14 @@ function ReleaseForm() {
           </select>
         </Field>
       </div>
+      <CoverPicker seed={coverSeed} title={title || "Релиз"} cover={cover} onCover={setCover} />
       <div className="flex flex-wrap items-end gap-3">
         <Field label="Год">
           <input type="number" min={2000} max={2100} value={year} onChange={(e) => setYear(Number(e.target.value))} className={`${inputCls} w-28`} />
         </Field>
+        <button type="button" onClick={() => setCoverSeed(Math.floor(Math.random() * 500) + 200)} className={btnGhost}>
+          ДРУГАЯ ГЕНЕРАТИВНАЯ
+        </button>
         <button type="submit" className={btnPrimary}>СОЗДАТЬ РЕЛИЗ</button>
         {msg && <span className={msgCls}>{msg}</span>}
       </div>
@@ -336,7 +466,6 @@ function NewsForm() {
     setBody("");
     setTimeout(() => setMsg(""), 3000);
   };
-
   return (
     <form onSubmit={submit} className="border border-line rounded-xl bg-coal/60 p-6 space-y-4">
       <div className="flex items-center gap-2 mb-1">
@@ -393,7 +522,6 @@ function UpcomingTab() {
     setDateStr("");
     setTimeout(() => setMsg(""), 3000);
   };
-
   return (
     <div className="space-y-6">
       <form onSubmit={submit} className="border border-line rounded-xl bg-coal/60 p-6 space-y-4">
@@ -441,22 +569,24 @@ function UpcomingTab() {
             return (
               <div key={u.id} className="border border-line rounded-xl bg-gradient-to-br from-navy to-coal p-5 relative overflow-hidden">
                 <div className="absolute inset-0 bg-scan opacity-40 pointer-events-none" />
-                <div className="relative">
+                <div className="relative min-w-0">
                   <div className="flex items-start justify-between gap-3">
-                    <div>
+                    <div className="min-w-0">
                       <div className="text-[10px] tracking-[0.25em] text-sky font-semibold">{a.name} · {u.kind}</div>
-                      <div className="font-display font-black text-xl uppercase mt-1">{u.title}</div>
+                      <div className="font-display font-black text-xl uppercase mt-1 break-words">{u.title}</div>
                     </div>
                     <button
                       onClick={() => {
                         if (window.confirm(`Убрать анонс «${u.title}»?`)) removeUpcoming(u.id);
                       }}
-                      className="text-paper/30 hover:text-blue border border-line hover:border-blue rounded-lg px-2.5 py-1.5 text-[11px] font-display font-bold transition-all"
+                      className="shrink-0 text-paper/30 hover:text-blue border border-line hover:border-blue rounded-lg px-2.5 py-1.5 text-[11px] font-display font-bold transition-all"
                     >
-                      ✕
+                      УБРАТЬ
                     </button>
                   </div>
-                  <div className="mt-4 scale-75 origin-left"><Countdown date={u.date} /></div>
+                  <div className="mt-4">
+                    <Countdown date={u.date} />
+                  </div>
                   <div className="mt-3 text-xs text-paper/45">{fmtDate(u.date)} · {u.note}</div>
                 </div>
               </div>
@@ -487,7 +617,6 @@ function ArtistTab() {
     setMsg("Информация обновлена на всех страницах артиста");
     setTimeout(() => setMsg(""), 3000);
   };
-
   return (
     <form onSubmit={submit} className="border border-line rounded-xl bg-coal/60 p-6 space-y-4">
       <div className="flex items-center gap-2 mb-1">
@@ -531,9 +660,63 @@ function ArtistTab() {
   );
 }
 
-/* ================= sync & danger zone ================= */
+/* ================= sync tab ================= */
+const SQL_TEXT = `create table if not exists public.platform_state (
+  id int primary key,
+  data jsonb not null,
+  updated_at timestamptz default now()
+);
+alter table public.platform_state enable row level security;
+create policy "ts_read" on public.platform_state for select using (true);
+create policy "ts_insert" on public.platform_state for insert with check (true);
+create policy "ts_update" on public.platform_state for update using (true) with check (true);
+alter publication supabase_realtime add table public.platform_state;`;
+
 function SyncTab() {
-  const { online, resetAll, syncMode } = useStore();
+  const { online, syncMode, reconnect } = useStore();
+  const [url, setUrl] = useState("");
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const connect = async () => {
+    if (busy) return;
+    if (!url.trim() || !key.trim()) {
+      setMsg({ ok: false, text: "Нужны и URL проекта, и anon-ключ" });
+      return;
+    }
+    setBusy(true);
+    setMsg(null);
+    const res = await testCloud(url.trim(), key.trim());
+    if (!res.ok) {
+      setMsg({ ok: false, text: `Не подключилось: ${res.error ?? "проверьте ключи и SQL-скрипт"}` });
+      setBusy(false);
+      return;
+    }
+    configureCloud(url.trim(), key.trim());
+    reconnect();
+    setMsg({ ok: true, text: "Облако подключено — контент теперь общий для всех устройств" });
+    setBusy(false);
+  };
+
+  const disconnect = () => {
+    if (window.confirm("Отключить облако? Площадка вернётся в локальный режим этого браузера.")) {
+      disconnectCloud();
+      reconnect();
+      setMsg({ ok: true, text: "Облако отключено — работает локальный режим" });
+    }
+  };
+
+  const copySql = async () => {
+    try {
+      await navigator.clipboard.writeText(SQL_TEXT);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard недоступен */
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -548,8 +731,8 @@ function SyncTab() {
           </div>
           <p className="mt-3 text-sm text-paper/55 leading-relaxed max-w-2xl">
             {syncMode === "cloud"
-              ? "Все изменения (треки, релизы, анонсы, новости, прослушивания) мгновенно видны каждому пользователю на любом устройстве. Онлайн-счётчик показывает реальных посетителей площадки прямо сейчас."
-              : "Данные сохраняются в этом браузере и мгновенно синхронизируются между всеми открытыми вкладками. Онлайн-счётчик показывает посетителей этого устройства. Чтобы изменения видели все пользователи на всех устройствах — подключите бесплатный Supabase (инструкция ниже)."}
+              ? "Все изменения (треки, релизы, анонсы, новости, аккаунты, прослушивания) мгновенно видны каждому пользователю на любом устройстве. Онлайн-счётчик показывает реальных посетителей площадки прямо сейчас."
+              : "Данные сохраняются в этом браузере — другие устройства их не видят. Подключите бесплатный Supabase прямо здесь, без пересборки сайта, и площадка станет общей для всех."}
           </p>
           <div className="mt-4 flex flex-wrap gap-6 text-sm">
             <div>
@@ -561,30 +744,60 @@ function SyncTab() {
               <div className="text-[10px] tracking-[0.2em] text-paper/40 uppercase mt-1">транспорт синхронизации</div>
             </div>
           </div>
+          {syncMode === "cloud" && (
+            <button onClick={disconnect} className={`${btnGhost} mt-5`}>
+              ОТКЛЮЧИТЬ ОБЛАКО
+            </button>
+          )}
         </div>
       </div>
 
       {syncMode === "local" && (
-        <div className="border border-line rounded-xl bg-coal/60 p-6">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="w-5 h-[3px] bg-blue" />
-            <h3 className="font-display font-bold text-sm tracking-wider uppercase">Как включить синхронизацию для всех устройств</h3>
+        <>
+          <div className="border border-line rounded-xl bg-coal/60 p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="w-5 h-[3px] bg-blue" />
+              <h3 className="font-display font-bold text-sm tracking-wider uppercase">Подключить облако (2 минуты)</h3>
+            </div>
+            <ol className="space-y-2.5 text-sm text-paper/60 leading-relaxed list-none">
+              {[
+                <>Создайте бесплатный проект на <span className="text-sky">supabase.com</span> (тариф Free).</>,
+                <>Откройте SQL Editor, вставьте скрипт (кнопка ниже) и нажмите Run — он создаст таблицу и realtime-канал. Полный вариант — в файле <span className="text-sky">supabase.sql</span>.</>,
+                <>Скопируйте URL проекта и ключ <span className="text-sky">anon public</span> (Settings → API) в поля ниже.</>,
+                <>Нажмите «Проверить и подключить». Пересобирать сайт не нужно — режим включится сразу и сохранится в браузере.</>,
+              ].map((step, i) => (
+                <li key={i} className="flex gap-3">
+                  <span className="shrink-0 w-6 h-6 rounded bg-blue/15 border border-blue/40 text-sky font-display font-bold text-xs flex items-center justify-center">{i + 1}</span>
+                  <span>{step}</span>
+                </li>
+              ))}
+            </ol>
+            <button onClick={() => void copySql()} className={btnGhost}>
+              {copied ? "SQL СКОПИРОВАН" : "СКОПИРОВАТЬ SQL-СКРИПТ"}
+            </button>
           </div>
-          <ol className="space-y-3 text-sm text-paper/60 leading-relaxed list-none">
-            {[
-              <>Создайте бесплатный проект на <span className="text-sky">supabase.com</span> (тариф Free подходит).</>,
-              <>Откройте SQL Editor и выполните скрипт <span className="text-sky">supabase.sql</span> из корня этого репозитория — он создаст таблицу состояния, политики доступа и realtime-канал.</>,
-              <>Скопируйте URL проекта и ключ <span className="text-sky">anon public key</span> (Settings → API).</>,
-              <>В GitHub: Settings → Secrets → добавьте <span className="text-sky">VITE_SUPABASE_URL</span> и <span className="text-sky">VITE_SUPABASE_ANON_KEY</span>. Workflow сборки подхватит их автоматически.</>,
-              <>Запушьте любой коммит — Pages пересоберётся, и площадка перейдёт в облачный режим: общий контент, живые счётчики и реальный онлайн для всех.</>,
-            ].map((step, i) => (
-              <li key={i} className="flex gap-3">
-                <span className="shrink-0 w-6 h-6 rounded bg-blue/15 border border-blue/40 text-sky font-display font-bold text-xs flex items-center justify-center">{i + 1}</span>
-                <span>{step}</span>
-              </li>
-            ))}
-          </ol>
-        </div>
+
+          <div className="border border-line rounded-xl bg-coal/60 p-6 space-y-4">
+            <div className="grid md:grid-cols-2 gap-4">
+              <Field label="URL проекта Supabase">
+                <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://xxxx.supabase.co" className={inputCls} />
+              </Field>
+              <Field label="Anon public key">
+                <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="eyJhbGciOi…" className={inputCls} />
+              </Field>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <button onClick={() => void connect()} disabled={busy} className={btnPrimary}>
+                {busy ? "ПРОВЕРКА СОЕДИНЕНИЯ…" : "ПРОВЕРИТЬ И ПОДКЛЮЧИТЬ"}
+              </button>
+              {msg && <span className={`${msgCls} ${msg.ok ? "" : "border-blue/60"}`}>{msg.text}</span>}
+            </div>
+            <p className="text-[11px] text-paper/35 leading-relaxed">
+              Ключи хранятся только в вашем браузере. Альтернатива для GitHub Pages — секреты репозитория
+              <span className="text-sky"> VITE_SUPABASE_URL</span> и <span className="text-sky">VITE_SUPABASE_ANON_KEY</span>: облако включится при сборке для всех посетителей.
+            </p>
+          </div>
+        </>
       )}
 
       <div className="border border-line rounded-xl bg-coal/60 p-6">
@@ -593,28 +806,132 @@ function SyncTab() {
           <h3 className="font-display font-bold text-sm tracking-wider uppercase">Сброс данных</h3>
         </div>
         <p className="text-sm text-paper/50 leading-relaxed mb-4">
-          Полностью очищает площадку: треки, релизы, анонсы, новости и счётчики прослушиваний. Изменение сразу увидят все слушатели.
+          Очищает витрину площадки: треки, релизы, анонсы, новости и счётчики прослушиваний. Админ-пароль и аккаунты слушателей сохраняются. Изменение сразу увидят все слушатели.
         </p>
         <button
           onClick={() => {
-            if (window.confirm("Точно очистить всю площадку? Отменить это нельзя.")) resetAll();
+            if (window.confirm("Точно очистить витрину площадки? Отменить это нельзя.")) resetAllSafe();
           }}
           className={btnGhost}
         >
-          ОЧИСТИТЬ ПЛОЩАДКУ
+          ОЧИСТИТЬ ВИТРИНУ
         </button>
-        <span className="ml-3 text-xs text-paper/35">Пароль администратора: {ADMIN_PASSWORD} (хранится в коде, при желании замените его там)</span>
+      </div>
+    </div>
+  );
+
+  function resetAllSafe() {
+    // обёртка, чтобы не тянуть resetAll в деструктуризацию выше
+    resetRef.current();
+  }
+}
+
+/* ================= access tab ================= */
+function AccessTab() {
+  const { admin, users, deleteUser, changeAdminPw } = useStore();
+  const [oldPw, setOldPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [confirmPw, setConfirmPw] = useState("");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    if (newPw !== confirmPw) {
+      setMsg({ ok: false, text: "Новые пароли не совпадают" });
+      return;
+    }
+    setBusy(true);
+    const res = await changeAdminPw(oldPw, newPw);
+    setBusy(false);
+    if (res) setMsg({ ok: false, text: res });
+    else {
+      setMsg({ ok: true, text: "Пароль обновлён — действует на всех устройствах" });
+      setOldPw("");
+      setNewPw("");
+      setConfirmPw("");
+    }
+    setTimeout(() => setMsg(null), 4000);
+  };
+
+  return (
+    <div className="space-y-6">
+      <form onSubmit={submit} className="border border-line rounded-xl bg-coal/60 p-6 space-y-4">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="w-5 h-[3px] bg-blue" />
+          <h3 className="font-display font-bold text-sm tracking-wider uppercase">Пароль администратора</h3>
+        </div>
+        <p className="text-xs text-paper/40 -mt-1">
+          Сейчас действует: {admin ? "ваш собственный пароль" : `стартовый пароль (${DEFAULT_ADMIN_PASSWORD})`}. Новый пароль сохраняется в общем состоянии и работает на всех устройствах.
+        </p>
+        <div className="grid md:grid-cols-3 gap-4">
+          <Field label="Текущий пароль">
+            <input type="password" value={oldPw} onChange={(e) => setOldPw(e.target.value)} className={inputCls} required />
+          </Field>
+          <Field label="Новый пароль">
+            <input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} className={inputCls} required minLength={4} />
+          </Field>
+          <Field label="Повторите новый">
+            <input type="password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} className={inputCls} required minLength={4} />
+          </Field>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="submit" disabled={busy} className={btnPrimary}>
+            {busy ? "СОХРАНЕНИЕ…" : "СМЕНИТЬ ПАРОЛЬ"}
+          </button>
+          {msg && <span className={msgCls}>{msg.text}</span>}
+        </div>
+      </form>
+
+      <div className="border border-line rounded-xl bg-coal/60 p-6">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="w-5 h-[3px] bg-blue" />
+          <h3 className="font-display font-bold text-sm tracking-wider uppercase">Аккаунты слушателей</h3>
+          <span className="ml-1 text-xs text-paper/40 tabular-nums">{users.length}</span>
+        </div>
+        <p className="text-xs text-paper/40 mb-4">
+          Слушатели регистрируются кнопкой «Войти» в сайдбаре. Аккаунт синхронизирует их избранное между устройствами (в облачном режиме).
+        </p>
+        {users.length ? (
+          <div className="divide-y divide-line/60">
+            {users.map((u) => (
+              <div key={u.id} className="flex items-center gap-3 py-3">
+                <span className="w-9 h-9 shrink-0 rounded-lg bg-blue/15 border border-blue/40 text-sky font-display font-black text-xs flex items-center justify-center uppercase">
+                  {u.nick.slice(0, 2)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-sm truncate">{u.nick}</div>
+                  <div className="text-xs text-paper/40 truncate">{u.email} · с {fmtDate(u.createdAt)} · {u.favs.length} в избранном</div>
+                </div>
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Удалить аккаунт «${u.nick}»?`)) deleteUser(u.id);
+                  }}
+                  className="text-paper/30 hover:text-blue border border-line hover:border-blue rounded-lg px-3 py-2 text-xs font-display font-bold tracking-wider transition-all"
+                >
+                  УДАЛИТЬ
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="border border-dashed border-line rounded-xl p-8 text-center text-paper/40 text-sm">
+            Пока никто не зарегистрировался.
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 /* ================= dashboard ================= */
-type Tab = "tracks" | "releases" | "upcoming" | "news" | "artists" | "sync";
+type Tab = "tracks" | "releases" | "upcoming" | "news" | "artists" | "sync" | "access";
 
 function Dashboard() {
-  const { tracks, releases, news, upcoming, deleteTrack, deleteRelease, deleteNews, logout, playsOf, artists } = useStore();
+  const { tracks, releases, news, upcoming, users, deleteTrack, deleteRelease, deleteNews, logout, playsOf, artists, syncMode, resetAll } = useStore();
   const [tab, setTab] = useState<Tab>("tracks");
+  resetRef.current = resetAll;
 
   const tabs: { id: Tab; label: string; count: number }[] = [
     { id: "tracks", label: "ТРЕКИ", count: tracks.length },
@@ -622,7 +939,8 @@ function Dashboard() {
     { id: "upcoming", label: "АНОНСЫ", count: upcoming.length },
     { id: "news", label: "НОВОСТИ", count: news.length },
     { id: "artists", label: "АРТИСТЫ", count: 2 },
-    { id: "sync", label: "СИНХРОНИЗАЦИЯ", count: SYNC_MODE === "cloud" ? 1 : 0 },
+    { id: "sync", label: "СИНХРОНИЗАЦИЯ", count: syncMode === "cloud" ? 1 : 0 },
+    { id: "access", label: "ДОСТУП", count: users.length },
   ];
 
   return (
@@ -659,15 +977,18 @@ function Dashboard() {
           <div className="border border-line rounded-xl bg-coal/40 divide-y divide-line/60 overflow-hidden">
             {tracks.map((t) => (
               <div key={t.id} className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.03] transition-colors">
-                <Cover seed={t.seed} title={t.title} className="w-10 h-10 rounded-md border border-line shrink-0" />
+                <Cover seed={t.seed} title={t.title} cover={t.cover} className="w-10 h-10 rounded-md border border-line shrink-0" />
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold text-sm truncate">{t.title}</div>
                   <div className="text-xs text-paper/40 truncate">
                     {artists[t.artistId].name}
                     {t.feat && ` feat. ${artists[t.feat].name}`} · {t.kind === "file" ? "аудиофайл" : `синтез · ${t.bpm} BPM`} · {fmtTime(t.duration)} · {fmtDate(t.addedAt)}
+                    {t.cover && <span className="text-sky"> · своя обложка</span>}
                   </div>
                 </div>
-                <span className="hidden sm:block text-xs text-paper/40 tabular-nums">{playsOf(t.id)} {pluralRu(playsOf(t.id), "стрим", "стрима", "стримов")}</span>
+                <span className="hidden sm:block text-xs text-paper/40 tabular-nums">
+                  {playsOf(t.id)} {pluralRu(playsOf(t.id), "стрим", "стрима", "стримов")}
+                </span>
                 <button
                   onClick={() => {
                     if (window.confirm(`Удалить трек «${t.title}»?`)) deleteTrack(t.id);
@@ -689,13 +1010,16 @@ function Dashboard() {
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {releases.map((r) => (
               <div key={r.id} className="flex items-center gap-3 border border-line rounded-xl bg-coal/60 p-3">
-                <Cover seed={r.coverSeed} title={r.title} className="w-14 h-14 rounded-lg border border-line shrink-0" />
+                <Cover seed={r.coverSeed} title={r.title} cover={r.cover} className="w-14 h-14 rounded-lg border border-line shrink-0" />
                 <div className="min-w-0 flex-1">
                   <div className="font-display font-bold text-sm uppercase truncate">{r.title}</div>
                   <div className="text-xs text-paper/40">
                     {artists[r.artistId].name} · {KIND_LABEL[r.kind]} · {r.year}
                   </div>
-                  <div className="text-xs text-paper/30">{tracks.filter((t) => t.releaseId === r.id).length} {pluralRu(tracks.filter((t) => t.releaseId === r.id).length, "трек", "трека", "треков")}</div>
+                  <div className="text-xs text-paper/30">
+                    {tracks.filter((t) => t.releaseId === r.id).length}{" "}
+                    {pluralRu(tracks.filter((t) => t.releaseId === r.id).length, "трек", "трека", "треков")}
+                  </div>
                 </div>
                 <button
                   onClick={() => {
@@ -703,7 +1027,7 @@ function Dashboard() {
                   }}
                   className="self-start text-paper/30 hover:text-blue border border-line hover:border-blue rounded-lg px-2.5 py-1.5 text-[11px] font-display font-bold transition-all"
                 >
-                  ✕
+                  УДАЛИТЬ
                 </button>
               </div>
             ))}
@@ -745,17 +1069,20 @@ function Dashboard() {
 
       {tab === "artists" && <ArtistTab />}
       {tab === "sync" && <SyncTab />}
+      {tab === "access" && <AccessTab />}
 
       <Reveal>
         <div className="mt-10 border border-line rounded-xl bg-coal/40 p-5 text-xs text-paper/35 leading-relaxed">
           Все изменения сохраняются и сразу видны слушателям: на главной, в музыке, в треках и на страницах артистов.
-          Аудиофайлы хранятся локально (IndexedDB), синтезированные треки генерируются звуковым движком TimurSounds в реальном времени.
-          Счётчики прослушиваний и онлайна — настоящие: они растут только от реальных действий слушателей.
+          Аудиофайлы хранятся локально (IndexedDB), обложки — в общем состоянии площадки, синтезированные треки генерируются
+          звуковым движком TimurSounds в реальном времени. В облачном режиме всё это общее для каждого устройства.
         </div>
       </Reveal>
     </div>
   );
 }
+
+const resetRef: { current: () => void } = { current: () => undefined };
 
 export function Admin() {
   const { isAdmin } = useStore();

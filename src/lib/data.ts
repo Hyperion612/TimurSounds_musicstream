@@ -17,6 +17,7 @@ export interface Release {
   kind: ReleaseKind;
   year: number;
   coverSeed: number;
+  cover?: string; // dataURL своей обложки (если задана — вместо генеративной)
 }
 
 export interface Track {
@@ -30,6 +31,7 @@ export interface Track {
   seed: number;
   kind: "synth" | "file";
   addedAt: number;
+  cover?: string; // dataURL своей обложки (из файла или из метаданных аудио)
 }
 
 export interface NewsItem {
@@ -49,6 +51,21 @@ export interface Upcoming {
   note: string;
 }
 
+export interface UserAccount {
+  id: string;
+  email: string;
+  nick: string;
+  salt: string;
+  hash: string;
+  favs: string[];
+  createdAt: number;
+}
+
+export interface AdminCreds {
+  salt: string;
+  hash: string;
+}
+
 export interface State {
   v: number;
   artists: Record<ArtistId, Artist>;
@@ -57,6 +74,8 @@ export interface State {
   news: NewsItem[];
   upcoming: Upcoming[];
   plays: Record<string, number>;
+  users: UserAccount[];
+  admin: AdminCreds | null; // null — действует стартовый пароль
 }
 
 export const STATE_VERSION = 1;
@@ -87,6 +106,8 @@ export function emptyState(): State {
     news: [],
     upcoming: [],
     plays: {},
+    users: [],
+    admin: null,
   };
 }
 

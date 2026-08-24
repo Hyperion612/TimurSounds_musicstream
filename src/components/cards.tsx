@@ -5,6 +5,12 @@ import { useStore } from "../lib/store";
 import { Cover } from "./ui";
 import type { Release, Track } from "../lib/data";
 
+/**
+ * Единая сетка таблицы треков. Используют и шапки страниц, и TrackRow —
+ * поэтому колонки «Плеи» и «Время» всегда стоят ровно под заголовками.
+ */
+export const TRACK_GRID = "md:grid-cols-[2.25rem_minmax(0,1fr)_minmax(0,11rem)_5rem_3.5rem_2rem]";
+
 export function PlayIcon({ size = 14, className = "" }: { size?: number; className?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 14 14" className={className} aria-hidden>
@@ -51,7 +57,7 @@ export function TrackRow({
 
   return (
     <div
-      className={`group grid grid-cols-[2.25rem_minmax(0,1fr)_3.5rem_2rem] md:grid-cols-[2.25rem_minmax(0,1fr)_${showRelease ? "minmax(0,11rem)_" : ""}5rem_3.5rem_2rem] gap-3 items-center px-3 py-2.5 rounded-lg transition-colors ${
+      className={`group grid grid-cols-[2.25rem_minmax(0,1fr)_3.5rem_2rem] ${TRACK_GRID} gap-3 items-center px-3 py-2.5 rounded-lg transition-colors ${
         active ? "bg-blue/10 border border-blue/25" : "hover:bg-white/[0.04] border border-transparent"
       }`}
     >
@@ -74,24 +80,34 @@ export function TrackRow({
         )}
       </button>
 
-      <div className="min-w-0">
-        <div className={`font-medium truncate leading-tight ${active ? "text-bluehi" : "text-paper"}`}>{track.title}</div>
-        <div className="text-xs text-paper/45 truncate mt-0.5">
-          <Link to={`/artist/${track.artistId}`} className="hover:text-sky transition-colors">{a.name}</Link>
-          {feat && <span> feat. <Link to={`/artist/${track.feat}`} className="hover:text-sky transition-colors">{feat.name}</Link></span>}
-          {track.kind === "file" && <span className="text-sky/70"> · аудио</span>}
+      <div className="flex items-center gap-3 min-w-0">
+        <Cover
+          seed={track.seed}
+          title={track.title}
+          cover={track.cover}
+          className="hidden sm:block w-10 h-10 rounded-md border border-line shrink-0"
+        />
+        <div className="min-w-0">
+          <div className={`font-medium truncate leading-tight ${active ? "text-bluehi" : "text-paper"}`}>{track.title}</div>
+          <div className="text-xs text-paper/45 truncate mt-0.5">
+            <Link to={`/artist/${track.artistId}`} className="hover:text-sky transition-colors">{a.name}</Link>
+            {feat && <span> feat. <Link to={`/artist/${track.feat}`} className="hover:text-sky transition-colors">{feat.name}</Link></span>}
+            {track.kind === "file" && <span className="text-sky/70"> · аудио</span>}
+          </div>
         </div>
       </div>
 
-      {showRelease && (
-        <div className="hidden md:block min-w-0">
-          {rel ? (
-            <Link to={`/release/${rel.id}`} className="text-xs text-paper/40 hover:text-sky truncate block transition-colors">{rel.title}</Link>
+      {/* колонка «РЕЛИЗ» — ячейка есть всегда, иначе едут «Плеи» и «Время» */}
+      <div className="hidden md:block min-w-0">
+        {showRelease &&
+          (rel ? (
+            <Link to={`/release/${rel.id}`} className="text-xs text-paper/40 hover:text-sky truncate block transition-colors">
+              {rel.title}
+            </Link>
           ) : (
             <span className="text-xs text-paper/25">—</span>
-          )}
-        </div>
-      )}
+          ))}
+      </div>
 
       <div className="hidden md:block text-right text-xs text-paper/35 tabular-nums">{plays > 0 ? fmtNum(plays) : "—"}</div>
       <div className="text-right text-xs text-paper/50 tabular-nums">{fmtTime(track.duration)}</div>
@@ -118,7 +134,12 @@ export function ReleaseCard({ releaseId }: { releaseId: string }) {
   return (
     <Link to={`/release/${rel.id}`} className="group block">
       <div className="relative overflow-hidden rounded-xl border border-line group-hover:border-blue transition-all duration-300 group-hover:-translate-y-1.5 group-hover:shadow-[0_18px_44px_-18px_rgba(31,91,255,0.55)]">
-        <Cover seed={rel.coverSeed} title={rel.title} className="w-full aspect-square transition-transform duration-500 group-hover:scale-[1.04]" />
+        <Cover
+          seed={rel.coverSeed}
+          title={rel.title}
+          cover={rel.cover}
+          className="w-full aspect-square transition-transform duration-500 group-hover:scale-[1.04]"
+        />
         <span className="absolute top-2.5 left-2.5 text-[10px] font-display font-bold tracking-[0.18em] bg-ink/85 border border-line text-sky px-2 py-1 rounded">
           {KIND_LABEL[rel.kind]}
         </span>

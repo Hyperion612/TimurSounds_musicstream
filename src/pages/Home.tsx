@@ -5,7 +5,7 @@ import { usePlayer } from "../lib/player";
 import { useStore } from "../lib/store";
 import { useWave } from "../lib/wave";
 import { Countdown, Monogram, Reveal, SectionHead } from "../components/ui";
-import { ArtistCard, PlayIcon, TrackRow } from "../components/cards";
+import { ArtistCard, PlayIcon, TRACK_GRID, TrackRow } from "../components/cards";
 
 const TAG_COLOR: Record<NewsTag, string> = {
   релиз: "text-sky border-blue/40 bg-blue/15",
@@ -128,11 +128,11 @@ function CountdownBlock({ u }: { u: Upcoming }) {
             {a.name} · {u.kind}
           </span>
         </div>
-        <div className="mt-4 flex flex-wrap items-end justify-between gap-6">
-          <div>
-            <div className="font-display font-black uppercase text-3xl md:text-5xl leading-none text-shadow">{u.title}</div>
-            <p className="mt-4 text-paper/55 max-w-md text-sm leading-relaxed">{u.note}</p>
-          </div>
+        <div className="mt-4 min-w-0">
+          <div className="font-display font-black uppercase text-3xl md:text-5xl leading-none break-words">{u.title}</div>
+          <p className="mt-4 text-paper/55 max-w-xl text-sm leading-relaxed">{u.note}</p>
+        </div>
+        <div className="mt-6">
           <Countdown date={u.date} />
         </div>
         <div className="mt-6 flex flex-wrap items-center gap-4">
@@ -215,7 +215,7 @@ export function Home() {
           {ready && fresh.length > 0 ? (
             <Reveal>
               <div className="border border-line rounded-xl bg-coal/40 p-2 md:p-3 divide-y divide-line/60">
-                <div className="hidden md:grid grid-cols-[2.25rem_minmax(0,1fr)_minmax(0,11rem)_5rem_3.5rem_2rem] gap-3 px-3 pb-2 text-[10px] tracking-[0.25em] text-paper/30 font-semibold">
+                <div className={`hidden md:grid ${TRACK_GRID} gap-3 px-3 pb-2 text-[10px] tracking-[0.25em] text-paper/30 font-semibold`}>
                   <span className="text-center">#</span>
                   <span>ТРЕК</span>
                   <span>РЕЛИЗ</span>

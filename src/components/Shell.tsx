@@ -1,8 +1,8 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { useEffect } from "react";
-import { pluralRu } from "../lib/data";
+import { useEffect, useState } from "react";
 import { useStore } from "../lib/store";
 import { PlayerBar } from "./PlayerBar";
+import { AuthModal } from "./AuthModal";
 
 function Logo() {
   return (
@@ -50,10 +50,42 @@ function Icon({ name }: { name: string }) {
 
 export function Shell() {
   const loc = useLocation();
-  const { artist, online, syncMode } = useStore();
+  const { artist, syncMode, currentUser, userLogout, favs } = useStore();
+  const [authOpen, setAuthOpen] = useState(false);
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, [loc.pathname]);
+
+  const accountBlock = currentUser ? (
+    <div className="flex items-center gap-3 px-2 py-1">
+      <span className="w-9 h-9 shrink-0 rounded-lg bg-blue text-paper font-display font-black text-sm flex items-center justify-center uppercase">
+        {currentUser.nick.slice(0, 2)}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-semibold truncate leading-tight">{currentUser.nick}</div>
+        <div className="text-[10px] tracking-[0.15em] text-paper/40 uppercase mt-0.5">в избранном: {favs.length}</div>
+      </div>
+      <button onClick={userLogout} title="Выйти из аккаунта" className="text-paper/35 hover:text-blue p-1.5 rounded-lg border border-transparent hover:border-line transition-all">
+        <svg width="16" height="16" viewBox="0 0 17 17" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M6.5 2.5H3.8a1.3 1.3 0 0 0-1.3 1.3v8.4a1.3 1.3 0 0 0 1.3 1.3h2.7M11 5.5l3 3-3 3M14 8.5H6.8" />
+        </svg>
+      </button>
+    </div>
+  ) : (
+    <button
+      onClick={() => setAuthOpen(true)}
+      className="w-full bg-blue/12 border border-blue/40 text-sky hover:bg-blue hover:text-paper font-display text-[11px] font-bold tracking-[0.2em] py-2.5 rounded-lg transition-all hover:-translate-y-0.5"
+    >
+      ВОЙТИ · РЕГИСТРАЦИЯ
+    </button>
+  );
+
+  const modeLine = (
+    <span className={`inline-flex items-center gap-1.5 ${syncMode === "cloud" ? "text-sky" : "text-paper/35"}`}>
+      <span className={`w-1.5 h-1.5 rounded-full live-dot ${syncMode === "cloud" ? "bg-blue" : "bg-paper/35"}`} />
+      {syncMode === "cloud" ? "облако · синхронизация" : "локальный режим"}
+    </span>
+  );
 
   return (
     <div className="min-h-screen bg-ink text-paper">
@@ -90,8 +122,12 @@ export function Shell() {
             <NavLink to="/admin" className={navCls}><Icon name="lock" />Админ-панель</NavLink>
           </div>
         </nav>
-        <div className="px-6 py-5 border-t border-line text-[11px] text-paper/30 leading-relaxed">
-          © 2026 TimurSounds<br />лейбл · стриминг · сообщество
+        <div className="px-4 py-4 border-t border-line space-y-3">
+          {accountBlock}
+          <div className="px-2 text-[10px] text-paper/30 leading-relaxed flex items-center justify-between gap-2">
+            {modeLine}
+            <span>© 2026</span>
+          </div>
         </div>
       </aside>
 
@@ -99,9 +135,26 @@ export function Shell() {
       <header className="lg:hidden sticky top-0 z-40 bg-ink/92 backdrop-blur border-b border-line">
         <div className="px-4 py-3 flex items-center justify-between">
           <NavLink to="/"><Logo /></NavLink>
-          <NavLink to="/admin" className="text-paper/50 hover:text-paper transition-colors" aria-label="Админ-панель">
-            <Icon name="lock" />
-          </NavLink>
+          <div className="flex items-center gap-1.5">
+            {currentUser ? (
+              <button onClick={userLogout} className="flex items-center gap-2 border border-line rounded-full pl-1 pr-3 py-1 hover:border-blue transition-colors" title="Выйти из аккаунта">
+                <span className="w-7 h-7 rounded-full bg-blue text-paper font-display font-black text-[11px] flex items-center justify-center uppercase">
+                  {currentUser.nick.slice(0, 2)}
+                </span>
+                <span className="text-xs font-semibold max-w-24 truncate">{currentUser.nick}</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => setAuthOpen(true)}
+                className="text-[11px] font-display font-bold tracking-wider text-sky border border-blue/40 bg-blue/12 rounded-full px-3.5 py-2 hover:bg-blue hover:text-paper transition-all"
+              >
+                ВОЙТИ
+              </button>
+            )}
+            <NavLink to="/admin" className="text-paper/50 hover:text-paper transition-colors p-2" aria-label="Админ-панель">
+              <Icon name="lock" />
+            </NavLink>
+          </div>
         </div>
         <nav className="flex gap-2 overflow-x-auto px-4 pb-3 no-scrollbar">
           <NavLink to="/" end className={linkCls}>Главная</NavLink>
@@ -117,6 +170,7 @@ export function Shell() {
       </main>
 
       <PlayerBar />
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
     </div>
   );
 }

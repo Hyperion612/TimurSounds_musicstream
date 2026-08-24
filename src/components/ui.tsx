@@ -42,7 +42,20 @@ const BLUE = "#1f5bff";
 const SKY = "#8fb0ff";
 const PAPER = "#f2f5ff";
 
-export function Cover({ seed, title, className = "" }: { seed: number; title: string; className?: string }) {
+export function Cover({
+  seed,
+  title,
+  cover,
+  className = "",
+}: {
+  seed: number;
+  title: string;
+  cover?: string;
+  className?: string;
+}) {
+  if (cover) {
+    return <img src={cover} alt={`Обложка: ${title}`} className={`object-cover ${className}`} draggable={false} />;
+  }
   const rng = mulberry32(seed * 104729 + 7);
   const style = Math.floor(rng() * 4);
   const letter = (title.trim()[0] || "T").toUpperCase();
@@ -140,7 +153,7 @@ export function Eq({ active, className = "" }: { active: boolean; className?: st
   );
 }
 
-/* ---------- countdown ---------- */
+/* ---------- countdown (fluid: 4 равные колонки, ничего не вылезает) ---------- */
 export function Countdown({ date }: { date: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -149,29 +162,26 @@ export function Countdown({ date }: { date: number }) {
   }, []);
   const diff = date - now;
   if (diff <= 0) {
-    return <div className="font-display text-2xl md:text-4xl font-black text-blue">УЖЕ НА ПЛОЩАДКЕ</div>;
+    return <div className="font-display text-xl md:text-3xl font-black text-blue">УЖЕ НА ПЛОЩАДКЕ</div>;
   }
   const d = Math.floor(diff / 86400000);
   const h = Math.floor((diff / 3600000) % 24);
   const m = Math.floor((diff / 60000) % 60);
   const s = Math.floor((diff / 1000) % 60);
   const cell = (v: number, label: string) => (
-    <div className="flex flex-col items-center">
-      <div className="bg-ink border border-line rounded-lg px-3 py-2 md:px-5 md:py-3 min-w-[64px] md:min-w-[92px] text-center tabular-nums">
-        <span className="font-display text-3xl md:text-5xl font-black text-paper">{String(v).padStart(2, "0")}</span>
+    <div key={label} className="min-w-0 rounded-lg bg-ink/85 border border-line px-1 py-2 sm:py-3 text-center">
+      <div className="font-display font-black text-paper tabular-nums leading-none text-xl sm:text-2xl xl:text-4xl">
+        {String(v).padStart(2, "0")}
       </div>
-      <span className="mt-2 text-[10px] md:text-xs tracking-[0.25em] text-sky">{label}</span>
+      <div className="mt-1.5 text-[8px] sm:text-[10px] tracking-[0.18em] text-sky uppercase truncate px-0.5">{label}</div>
     </div>
   );
   return (
-    <div className="flex items-start gap-2 md:gap-4">
-      {cell(d, "ДНИ")}
-      <span className="font-display text-2xl md:text-4xl text-blue mt-3 md:mt-5">:</span>
-      {cell(h, "ЧАСЫ")}
-      <span className="font-display text-2xl md:text-4xl text-blue mt-3 md:mt-5">:</span>
-      {cell(m, "МИН")}
-      <span className="font-display text-2xl md:text-4xl text-blue mt-3 md:mt-5">:</span>
-      {cell(s, "СЕК")}
+    <div className="grid grid-cols-4 gap-1.5 sm:gap-2.5 w-full max-w-[460px]">
+      {cell(d, "дни")}
+      {cell(h, "часы")}
+      {cell(m, "минуты")}
+      {cell(s, "секунды")}
     </div>
   );
 }
