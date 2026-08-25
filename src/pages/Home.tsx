@@ -43,7 +43,7 @@ function LogoHero() {
             </Reveal>
             <Reveal delay={160}>
               <p className="mt-6 max-w-xl text-paper/60 text-base md:text-lg leading-relaxed">
-                Дом звука продюсера <span className="text-paper font-semibold">TIMUR</span> и официальная страница{" "}
+                Дом звука продюсера <span className="text-paper font-semibold">TIMUR</span> и страница с релизами{" "}
                 <span className="text-paper font-semibold">INSTASAMKA</span>. Релизы, новости и премьеры — в одном месте,
                 в трёх цветах.
               </p>
@@ -69,9 +69,9 @@ function LogoHero() {
             </Reveal>
             <Reveal delay={320}>
               <div className="mt-10 flex flex-wrap gap-x-8 gap-y-3 text-[11px] tracking-[0.2em] text-paper/35 uppercase">
-                <span>Основано · 2024</span>
-                <span>Жанры · techno / phonk / synthwave</span>
-                <span>Партнёр · NaMneCash Music</span>
+                <span>Основано · 2026</span>
+                <span>Жанры · techno / phonk / synthwave/electronic/pop/rap</span>
+                <span> TimurSounds / NaMneCash Music</span>
               </div>
             </Reveal>
           </div>
