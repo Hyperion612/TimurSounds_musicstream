@@ -47,7 +47,7 @@ export function TrackRow({
   queue: string[];
   showRelease?: boolean;
 }) {
-  const { playTrack, track: current, playing } = usePlayer();
+  const { playTrack, track: current, playing, prefetchTrack } = usePlayer();
   const { favs, toggleFav, artist, playsOf, getRelease } = useStore();
   const active = current?.id === track.id;
   const rel = track.releaseId ? getRelease(track.releaseId) : undefined;
@@ -57,6 +57,7 @@ export function TrackRow({
 
   return (
     <div
+      onMouseEnter={() => prefetchTrack(track)}
       className={`group grid grid-cols-[2.25rem_minmax(0,1fr)_3.5rem_2rem] ${TRACK_GRID} gap-3 items-center px-3 py-2.5 rounded-lg transition-colors ${
         active ? "bg-blue/10 border border-blue/25" : "hover:bg-white/[0.04] border border-transparent"
       }`}

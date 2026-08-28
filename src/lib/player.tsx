@@ -21,6 +21,8 @@ interface PlayerCtx {
   seek: (sec: number) => void;
   setVolume: (v: number) => void;
   toggleRepeat: () => void;
+  /** Предзагрузка аудио трека (кэш браузера) — старт без ожидания сети. */
+  prefetchTrack: (t: Track | null | undefined) => void;
 }
 
 const Ctx = createContext<PlayerCtx | null>(null);
@@ -55,6 +57,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       srcRef.current = null;
     }
   };
+
+  /* ---------- предзагрузка аудио (убирает ожидание сети при старте) ---------- */
+  const prefetchedRef = useRef(new Set<string>());
+  const prefetchTrack = useCallback((t: Track | null | undefined) => {
+    const url = t?.audioUrl;
+    if (!url || prefetchedRef.current.has(url)) return;
+    prefetchedRef.current.add(url);
+    try {
+      const a = new Audio();
+      a.preload = "auto";
+      a.src = url;
+      a.load();
+    } catch {
+      /* предзагрузка — оптимизация, не критична */
+    }
+  }, []);
 
   const startSource = useCallback(async (t: Track, offset = 0) => {
     const token = ++tokenRef.current;
@@ -107,7 +125,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
     setPosition(offset);
     setPlaying(true);
-  }, []);
+    // пока играет текущий трек — следующий в очереди уже греется в кэше
+    const nq = queueRef.current;
+    const ni = idxRef.current + 1;
+    if (ni < nq.length) prefetchTrack(storeRef.current.getTrack(nq[ni]));
+  }, [prefetchTrack]);
 
   const handleEnded = useCallback(() => {
     if (repeatRef.current) {
@@ -252,8 +274,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       seek,
       setVolume,
       toggleRepeat: () => setRepeat((r) => !r),
+      prefetchTrack,
     }),
-    [track, queue, qIndex, playing, position, volume, repeat, playTrack, toggle, jump, seek, setVolume]
+    [track, queue, qIndex, playing, position, volume, repeat, playTrack, toggle, jump, seek, setVolume, prefetchTrack]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

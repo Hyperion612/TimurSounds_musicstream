@@ -3,7 +3,8 @@ import type { ReactNode } from "react";
 import { emptyState } from "./data";
 import type { Artist, ArtistId, NewsItem, Release, State, Track, Upcoming, UserAccount } from "./data";
 import { delAudio } from "./db";
-import { createSync, deleteCloudAudio, getSyncMode, onSyncWarn } from "./sync";
+import { createSync, getSyncMode, onSyncWarn } from "./sync";
+import { deleteRemoteAudio } from "./r2";
 import type { SyncMode, SyncProvider } from "./sync";
 
 const LS_AUTH = "ts_admin_authed";
@@ -320,9 +321,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }));
         setGuestFavs((f) => f.filter((x) => x !== id));
         // целостность данных: вместе с треком удаляем аудиофайл из IndexedDB
-        // и из облачного хранилища (если он туда загружался)
+        // и из облачного хранилища — R2 или Supabase Storage (если он туда загружался)
         void delAudio(id);
-        if (t?.audioUrl) void deleteCloudAudio(id);
+        if (t?.audioUrl) void deleteRemoteAudio(id, t.audioUrl);
       },
       addRelease: (r) => mutate((s) => ({ ...s, releases: [r, ...s.releases] })),
       deleteRelease: (id) =>

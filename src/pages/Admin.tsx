@@ -6,7 +6,8 @@ import { SynthSource } from "../lib/audio";
 import { putAudio } from "../lib/db";
 import { imageToCoverDataUrl, readAudioMeta } from "../lib/media";
 import { useStore } from "../lib/store";
-import { configureCloud, disconnectCloud, getSyncMode, testCloud, uploadCloudAudio } from "../lib/sync";
+import { configureCloud, disconnectCloud, testCloud } from "../lib/sync";
+import { audioBackend, clearR2Cfg, getR2Cfg, setR2Cfg, testR2, uploadRemoteAudio } from "../lib/r2";
 import { Countdown, Cover, Reveal } from "../components/ui";
 import { PauseIcon, PlayIcon } from "../components/cards";
 
@@ -344,11 +345,14 @@ function TrackForm() {
     const id = `u${Date.now().toString(36)}`;
     try {
       let audioUrl: string | undefined;
+      let uploadedTo: string | null = null;
       if (mode === "file" && file) {
         // локальная копия (IndexedDB) — трек играет на этом устройстве всегда
         await putAudio(id, file);
-        // облачная копия (Supabase Storage) — трек играет на любом устройстве
-        if (getSyncMode() === "cloud") audioUrl = (await uploadCloudAudio(id, file)) ?? undefined;
+        // облачная копия (R2 → Supabase Storage) — трек играет на любом устройстве
+        const up = await uploadRemoteAudio(id, file);
+        audioUrl = up.url ?? undefined;
+        uploadedTo = up.url ? (up.backend === "r2" ? "Cloudflare R2" : "Supabase Storage") : null;
       }
       const t: Track = {
         id,
@@ -365,8 +369,10 @@ function TrackForm() {
         audioUrl,
       };
       addTrack(t);
-      if (t.kind === "file" && getSyncMode() === "cloud" && !audioUrl) {
+      if (t.kind === "file" && !audioUrl) {
         setMsg(`Трек «${t.title}» опубликован, но файл не удалось выгрузить в облако — он играет только с этого устройства`);
+      } else if (uploadedTo === "Cloudflare R2") {
+        setMsg(`Трек «${t.title}» опубликован — аудио в Cloudflare R2, играет быстро у всех слушателей`);
       } else {
         setMsg(`Трек «${t.title}» опубликован — у всех слушателей`);
       }
@@ -755,6 +761,161 @@ function ArtistTab() {
   );
 }
 
+/* ================= audio storage (Cloudflare R2) ================= */
+const WORKER_TEXT = `const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Allow-Headers": "*" };
+const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { ...CORS, "Content-Type": "application/json" } });
+const enc = new TextEncoder();
+const toHex = (buf) => Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+const hmac = async (key, msg) => {
+  const k = await crypto.subtle.importKey("raw", typeof key === "string" ? enc.encode(key) : key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return crypto.subtle.sign("HMAC", k, enc.encode(msg));
+};
+const sha256Hex = (msg) => crypto.subtle.digest("SHA-256", enc.encode(msg)).then(toHex);
+const uriEnc = (s) => encodeURIComponent(s).replace(/[!'()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
+async function presign({ method, host, path, expires = 900, env }) {
+  const amzDate = new Date().toISOString().replace(/[-:]/g, "").replace(/\\.\\d{3}/, "");
+  const dateStamp = amzDate.slice(0, 8);
+  const region = "auto";
+  const params = {
+    "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+    "X-Amz-Credential": env.R2_ACCESS_KEY_ID + "/" + dateStamp + "/" + region + "/s3/aws4_request",
+    "X-Amz-Date": amzDate, "X-Amz-Expires": String(expires), "X-Amz-SignedHeaders": "host",
+  };
+  const canonicalQuery = Object.keys(params).sort().map((k) => uriEnc(k) + "=" + uriEnc(params[k])).join("&");
+  const canonicalRequest = [method, path, canonicalQuery, "host:" + host + "\\n", "host", "UNSIGNED-PAYLOAD"].join("\\n");
+  const scope = dateStamp + "/" + region + "/s3/aws4_request";
+  const stringToSign = ["AWS4-HMAC-SHA256", amzDate, scope, await sha256Hex(canonicalRequest)].join("\\n");
+  let key = await hmac("AWS4" + env.R2_SECRET_ACCESS_KEY, dateStamp);
+  key = await hmac(key, region); key = await hmac(key, "s3"); key = await hmac(key, "aws4_request");
+  return "https://" + host + path + "?" + canonicalQuery + "&X-Amz-Signature=" + toHex(await hmac(key, stringToSign));
+}
+const NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+export default {
+  async fetch(req, env) {
+    if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
+    const url = new URL(req.url);
+    try {
+      if (url.pathname === "/health") return json({ ok: true, bucket: env.BUCKET, publicBase: env.PUBLIC_BASE });
+      if (url.pathname === "/sign-put" || url.pathname === "/sign-delete") {
+        const name = url.searchParams.get("name") || "";
+        if (!NAME_RE.test(name)) return json({ error: "bad name" }, 400);
+        const host = env.ACCOUNT_ID + ".r2.cloudflarestorage.com";
+        const path = "/" + env.BUCKET + "/" + name;
+        if (url.pathname === "/sign-put") {
+          const uploadUrl = await presign({ method: "PUT", host, path, expires: 900, env });
+          return json({ uploadUrl, publicUrl: String(env.PUBLIC_BASE).replace(/\\/+$/, "") + "/" + name, name });
+        }
+        return json({ deleteUrl: await presign({ method: "DELETE", host, path, expires: 300, env }), name });
+      }
+      return json({ error: "not found" }, 404);
+    } catch (e) { return json({ error: String((e && e.message) || e) }, 500); }
+  },
+};`;
+
+function StorageSection() {
+  const [signUrl, setSignUrl] = useState(() => getR2Cfg()?.signUrl ?? "");
+  const [publicBase, setPublicBase] = useState(() => getR2Cfg()?.publicBase ?? "");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const cfg = getR2Cfg();
+  const backend = audioBackend();
+
+  const connect = async () => {
+    if (busy) return;
+    if (!signUrl.trim() || !publicBase.trim()) {
+      setMsg({ ok: false, text: "Нужны и URL воркера, и публичный URL бакета" });
+      return;
+    }
+    setBusy(true);
+    const res = await testR2(signUrl);
+    if (!res.ok) {
+      setMsg({ ok: false, text: `Воркер не отвечает: ${res.error ?? "проверьте адрес и деплой"}` });
+      setBusy(false);
+      return;
+    }
+    setR2Cfg({ signUrl: signUrl.trim(), publicBase: publicBase.trim() });
+    setMsg({ ok: true, text: `Cloudflare R2 подключён (бакет «${res.error ?? "ts-audio"}») — аудио загружается в CDN` });
+    setBusy(false);
+  };
+
+  const copyWorker = async () => {
+    try {
+      await navigator.clipboard.writeText(WORKER_TEXT);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard недоступен */
+    }
+  };
+
+  return (
+    <div className="border border-line rounded-xl bg-coal/60 p-6 space-y-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="w-5 h-[3px] bg-blue" />
+        <h3 className="font-display font-bold text-sm tracking-wider uppercase">Хранилище аудио · Cloudflare R2</h3>
+        <span className={`ml-auto text-[10px] font-display font-bold tracking-[0.2em] px-2.5 py-1.5 rounded border ${backend === "r2" ? "bg-blue/15 border-blue/50 text-sky" : "border-line text-paper/40"}`}>
+          {backend === "r2" ? "R2 АКТИВЕН" : backend === "supabase" ? "SUPABASE STORAGE" : "ЛОКАЛЬНО"}
+        </span>
+      </div>
+      <p className="text-sm text-paper/55 leading-relaxed max-w-2xl">
+        Аудиофайлы загруженных треков раздаёт Cloudflare R2: ближайший к слушателю CDN-узел, нулевой egress и быстрый
+        первый байт — треки стартуют заметно быстрее, чем с Supabase Storage. База и realtime остаются в Supabase.
+        Секретные ключи R2 живут только в воркере и никогда не попадают в браузер.
+      </p>
+
+      {backend !== "r2" && (
+        <>
+          <ol className="space-y-2.5 text-sm text-paper/60 leading-relaxed list-none">
+            {[
+              <>В Cloudflare создайте бакет R2 с именем <span className="text-sky">ts-audio</span> и включите публичный доступ (R2 → бакет → Public access → r2.dev subdomain).</>,
+              <>Создайте API-токен (R2 → Manage R2 API Tokens → тип «Object Read & Write», бакет ts-audio).</>,
+              <>Разверните воркер: <span className="text-sky">cd cloudflare-r2 && wrangler deploy</span>, затем <span className="text-sky">wrangler secret put R2_ACCESS_KEY_ID</span> и <span className="text-sky">wrangler secret put R2_SECRET_ACCESS_KEY</span>. Код воркера и wrangler.toml — в папке cloudflare-r2 репозитория (кнопка ниже копирует код).</>,
+              <>Впишите URL воркера (<span className="text-sky">https://…workers.dev</span>) и публичный URL бакета (<span className="text-sky">https://pub-…r2.dev</span>) в поля ниже и сохраните. Пересборка сайта не нужна.</>,
+            ].map((step, i) => (
+              <li key={i} className="flex gap-3">
+                <span className="shrink-0 w-6 h-6 rounded bg-blue/15 border border-blue/40 text-sky font-display font-bold text-xs flex items-center justify-center">{i + 1}</span>
+                <span>{step}</span>
+              </li>
+            ))}
+          </ol>
+          <button onClick={() => void copyWorker()} className={btnGhost}>
+            {copied ? "КОД ВОРКЕРА СКОПИРОВАН" : "СКОПИРОВАТЬ КОД ВОРКЕРА (worker.js)"}
+          </button>
+        </>
+      )}
+
+      <div className="grid md:grid-cols-2 gap-4">
+        <Field label="URL воркера (пресайн)">
+          <input value={signUrl} onChange={(e) => setSignUrl(e.target.value)} placeholder="https://timursounds-r2-sign.user.workers.dev" className={inputCls} />
+        </Field>
+        <Field label="Публичный URL бакета">
+          <input value={publicBase} onChange={(e) => setPublicBase(e.target.value)} placeholder="https://pub-xxxxxxxx.r2.dev" className={inputCls} />
+        </Field>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <button onClick={() => void connect()} disabled={busy} className={btnPrimary}>
+          {busy ? "ПРОВЕРКА…" : cfg ? "ОБНОВИТЬ НАСТРОЙКИ" : "ПРОВЕРИТЬ И ПОДКЛЮЧИТЬ R2"}
+        </button>
+        {cfg && (
+          <button
+            onClick={() => {
+              if (window.confirm("Отключить R2? Новые загрузки пойдут в Supabase Storage (если подключён) или останутся локальными.")) {
+                clearR2Cfg();
+                setMsg({ ok: true, text: "R2 отключён" });
+              }
+            }}
+            className={btnGhost}
+          >
+            ОТКЛЮЧИТЬ R2
+          </button>
+        )}
+        {msg && <span className={msgCls}>{msg.text}</span>}
+      </div>
+    </div>
+  );
+}
+
 /* ================= sync tab ================= */
 const SQL_TEXT = `create table if not exists public.platform_state (
   id int primary key,
@@ -860,6 +1021,8 @@ function SyncTab() {
           )}
         </div>
       </div>
+
+      <StorageSection />
 
       {syncMode === "local" && (
         <>

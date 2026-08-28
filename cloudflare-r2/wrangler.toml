@@ -1,0 +1,15 @@
+# TimurSounds · R2 presign worker
+# Деплой:  cd cloudflare-r2 && wrangler deploy
+# Секреты: wrangler secret put R2_ACCESS_KEY_ID
+#          wrangler secret put R2_SECRET_ACCESS_KEY
+# (токены создаются в Cloudflare Dashboard → R2 → Manage R2 API Tokens,
+#  тип "Object Read & Write", доступ к бакету ts-audio)
+
+name = "timursounds-r2-sign"
+main = "worker.js"
+compatibility_date = "2024-09-01"
+
+[vars]
+ACCOUNT_ID = "ВАШ_ACCOUNT_ID"            # Cloudflare Dashboard → справа внизу
+BUCKET = "ts-audio"
+PUBLIC_BASE = "https://pub-xxxx.r2.dev"  # R2 → бакет → Public access → r2.dev subdomain
