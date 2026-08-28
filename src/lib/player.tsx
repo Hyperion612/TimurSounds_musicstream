@@ -77,10 +77,34 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     // 3) если аудио недоступно (файл не загрузился) — генеративный звук по сиду трека
     if (!src) src = new SynthSource({ bpm: t.bpm, seed: t.seed, duration: t.duration });
     if (token !== tokenRef.current) return;
+
+    // Резервный генеративный звук: трек обязан зазвучать, даже если файл
+    // не долетел (сеть, CORS, повреждённый blob) или старт бросил исключение.
+    const synthFallback = () => {
+      if (tokenRef.current !== token) return;
+      if (srcRef.current) {
+        srcRef.current.onEnded = null;
+        srcRef.current.stop();
+      }
+      const fs = new SynthSource({ bpm: t.bpm, seed: t.seed, duration: t.duration });
+      fs.setVolume(volumeRef.current);
+      fs.onEnded = () => handleEndedRef.current();
+      srcRef.current = fs;
+      fs.start(0);
+      setPosition(0);
+      setPlaying(true);
+    };
+
+    if (src instanceof FileSource) src.onError = synthFallback;
     src.setVolume(volumeRef.current);
     src.onEnded = () => handleEndedRef.current();
     srcRef.current = src;
-    src.start(offset);
+    try {
+      src.start(offset);
+    } catch {
+      synthFallback();
+      return;
+    }
     setPosition(offset);
     setPlaying(true);
   }, []);

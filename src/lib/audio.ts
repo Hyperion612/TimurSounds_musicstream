@@ -328,6 +328,8 @@ export class SynthSource implements Source {
 /* ---------- file playback ---------- */
 export class FileSource implements Source {
   onEnded: (() => void) | null = null;
+  /** Сеть/декодирование не удались — плеер переключится на резервный звук. */
+  onError: (() => void) | null = null;
   private el: HTMLAudioElement;
 
   constructor(url: string) {
@@ -335,22 +337,42 @@ export class FileSource implements Source {
     this.el.src = url;
     this.el.preload = "auto";
     this.el.addEventListener("ended", () => this.onEnded?.());
+    this.el.addEventListener("error", () => this.onError?.());
   }
 
   start(offset: number) {
-    this.el.currentTime = offset;
-    void this.el.play();
+    const el = this.el;
+    const go = () => {
+      // currentTime можно трогать только после загрузки метаданных,
+      // иначе браузер бросает InvalidStateError
+      try {
+        if (offset > 0 && el.readyState >= 1 && Number.isFinite(el.duration)) el.currentTime = offset;
+      } catch {
+        /* not seekable yet */
+      }
+      void el.play().catch(() => undefined);
+    };
+    if (el.readyState >= 1) {
+      go();
+    } else {
+      el.addEventListener("loadedmetadata", go, { once: true });
+      void el.play().catch(() => undefined); // запускает загрузку, go() довершит после метаданных
+    }
   }
   pause() {
     this.el.pause();
   }
   stop() {
     this.el.pause();
-    this.el.currentTime = 0;
+    try {
+      if (this.el.readyState >= 1) this.el.currentTime = 0;
+    } catch {
+      /* ignore */
+    }
   }
   seek(sec: number) {
     try {
-      this.el.currentTime = sec;
+      if (this.el.readyState >= 1) this.el.currentTime = sec;
     } catch {
       /* not seekable yet */
     }
