@@ -61,13 +61,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     destroySrc();
     let src: Source | null = null;
     if (t.kind === "file") {
-      try {
-        const blob = await getAudio(t.id);
-        if (blob) src = new FileSource(URL.createObjectURL(blob));
-      } catch {
-        src = null;
+      // 1) облачное хранилище — играет на любом устройстве
+      if (t.audioUrl) {
+        src = new FileSource(t.audioUrl);
+      } else {
+        // 2) локальный IndexedDB этого устройства
+        try {
+          const blob = await getAudio(t.id);
+          if (blob) src = new FileSource(URL.createObjectURL(blob));
+        } catch {
+          src = null;
+        }
       }
     }
+    // 3) если аудио недоступно (файл не загрузился) — генеративный звук по сиду трека
     if (!src) src = new SynthSource({ bpm: t.bpm, seed: t.seed, duration: t.duration });
     if (token !== tokenRef.current) return;
     src.setVolume(volumeRef.current);

@@ -50,7 +50,7 @@ function Icon({ name }: { name: string }) {
 
 export function Shell() {
   const loc = useLocation();
-  const { artist, syncMode, currentUser, userLogout, favs } = useStore();
+  const { artist, syncMode, currentUser, userLogout, favs, syncWarning } = useStore();
   const [authOpen, setAuthOpen] = useState(false);
   useEffect(() => {
     window.scrollTo({ top: 0 });
@@ -166,6 +166,14 @@ export function Shell() {
       </header>
 
       <main className="lg:pl-64 pb-32 lg:pb-28">
+        {syncWarning && (
+          <div className="mx-4 md:mx-8 lg:mx-10 mt-4 border border-blue/40 bg-blue/10 text-sky text-xs rounded-lg px-4 py-3 leading-relaxed flex items-start gap-3">
+            <svg className="shrink-0 mt-0.5" width="14" height="14" viewBox="0 0 17 17" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M8.5 2 1.8 14h13.4L8.5 2zM8.5 7v3.2M8.5 12.4v.1" />
+            </svg>
+            <span>{syncWarning}</span>
+          </div>
+        )}
         <Outlet />
       </main>
 

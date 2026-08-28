@@ -5,8 +5,8 @@ import type { Artist, ArtistId, NewsTag, ReleaseKind, Track } from "../lib/data"
 import { SynthSource } from "../lib/audio";
 import { putAudio } from "../lib/db";
 import { imageToCoverDataUrl, readAudioMeta } from "../lib/media";
-import { DEFAULT_ADMIN_PASSWORD, useStore } from "../lib/store";
-import { configureCloud, disconnectCloud, testCloud } from "../lib/sync";
+import { useStore } from "../lib/store";
+import { configureCloud, disconnectCloud, getSyncMode, testCloud, uploadCloudAudio } from "../lib/sync";
 import { Countdown, Cover, Reveal } from "../components/ui";
 import { PauseIcon, PlayIcon } from "../components/cards";
 
@@ -63,9 +63,78 @@ function Login() {
               {busy ? "ПРОВЕРКА…" : "ВОЙТИ"}
             </button>
           </form>
-          <p className="mt-4 text-[11px] text-paper/35">
-            Стартовый пароль — <span className="text-sky">{DEFAULT_ADMIN_PASSWORD}</span> (если вы его ещё не меняли во вкладке «Доступ»).
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================= первичная настройка пароля ================= */
+function Setup() {
+  const { setupAdmin, login } = useStore();
+  const [pw, setPw] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    const res = await setupAdmin(pw, confirm);
+    if (res) {
+      setErr(res);
+      setBusy(false);
+      return;
+    }
+    await login(pw);
+    setBusy(false);
+  };
+
+  return (
+    <div className="min-h-[70vh] flex items-center justify-center px-4">
+      <div className="w-full max-w-md border border-blue/40 rounded-2xl bg-coal p-8 md:p-10 relative overflow-hidden">
+        <div className="absolute inset-0 bg-scan pointer-events-none opacity-50" />
+        <div className="absolute -top-20 -right-20 w-56 h-56 rounded-full bg-blue/25 blur-[70px] pointer-events-none" />
+        <div className="relative">
+          <div className="flex items-center gap-2 mb-5">
+            <span className="w-6 h-[3px] bg-blue" />
+            <span className="text-[11px] tracking-[0.3em] text-sky font-semibold">ПЕРВЫЙ ВХОД</span>
+          </div>
+          <h1 className="font-display font-black text-2xl uppercase tracking-tight">Задайте пароль администратора</h1>
+          <p className="text-sm text-paper/50 mt-3 leading-relaxed">
+            У площадки пока нет админ-пароля. Создайте его — он сохранится в виде хэша в общем состоянии площадки
+            и будет действовать на всех устройствах. Дефолтного пароля не существует.
           </p>
+          <form onSubmit={submit} className="mt-6 space-y-3">
+            <input
+              type="password"
+              value={pw}
+              onChange={(e) => setPw(e.target.value)}
+              placeholder="Новый пароль (минимум 4 символа)"
+              autoFocus
+              minLength={4}
+              required
+              className="w-full bg-ink border border-line focus:border-blue outline-none rounded-lg px-4 py-3.5 text-sm placeholder:text-paper/30 transition-colors"
+            />
+            <input
+              type="password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              placeholder="Повторите пароль"
+              minLength={4}
+              required
+              className="w-full bg-ink border border-line focus:border-blue outline-none rounded-lg px-4 py-3.5 text-sm placeholder:text-paper/30 transition-colors"
+            />
+            {err && <div className="text-xs text-sky border border-blue/40 bg-blue/10 rounded-lg px-3 py-2">{err}</div>}
+            <button
+              type="submit"
+              disabled={busy}
+              className="w-full bg-blue hover:bg-bluehi disabled:opacity-50 text-paper font-display font-bold text-sm tracking-wider py-3.5 rounded-lg transition-all hover:-translate-y-0.5 active:scale-[0.98]"
+            >
+              {busy ? "СОХРАНЕНИЕ…" : "СОЗДАТЬ ПАРОЛЬ И ВОЙТИ"}
+            </button>
+          </form>
         </div>
       </div>
     </div>
@@ -184,6 +253,7 @@ function TrackForm() {
   const [seed, setSeed] = useState(() => Math.floor(Math.random() * 9000) + 1000);
   const [duration, setDuration] = useState(175);
   const [file, setFile] = useState<File | null>(null);
+  const [fileErr, setFileErr] = useState("");
   const [fileDur, setFileDur] = useState<number | null>(null);
   const [cover, setCover] = useState<string | undefined>();
   const [metaFound, setMetaFound] = useState(false);
@@ -196,6 +266,19 @@ function TrackForm() {
   const previewRef = useRef<SynthSource | null>(null);
 
   const onFile = (f: File | null) => {
+    setFileErr("");
+    if (f) {
+      if (!f.type.startsWith("audio/") && !/\.(mp3|wav|ogg|m4a|aac|flac)$/i.test(f.name)) {
+        setFileErr("Файл не похож на аудио — выберите MP3 / WAV / OGG");
+        setFile(null);
+        return;
+      }
+      if (f.size > 25 * 1024 * 1024) {
+        setFileErr("Файл больше 25 МБ — сожмите его перед загрузкой");
+        setFile(null);
+        return;
+      }
+    }
     setFile(f);
     setFileDur(null);
     setMetaFound(false);
@@ -260,7 +343,13 @@ function TrackForm() {
     setBusy(true);
     const id = `u${Date.now().toString(36)}`;
     try {
-      if (mode === "file" && file) await putAudio(id, file);
+      let audioUrl: string | undefined;
+      if (mode === "file" && file) {
+        // локальная копия (IndexedDB) — трек играет на этом устройстве всегда
+        await putAudio(id, file);
+        // облачная копия (Supabase Storage) — трек играет на любом устройстве
+        if (getSyncMode() === "cloud") audioUrl = (await uploadCloudAudio(id, file)) ?? undefined;
+      }
       const t: Track = {
         id,
         title: title.trim().toUpperCase(),
@@ -273,9 +362,14 @@ function TrackForm() {
         kind: mode === "file" && file ? "file" : "synth",
         addedAt: Date.now(),
         cover,
+        audioUrl,
       };
       addTrack(t);
-      setMsg(`Трек «${t.title}» опубликован — у всех слушателей`);
+      if (t.kind === "file" && getSyncMode() === "cloud" && !audioUrl) {
+        setMsg(`Трек «${t.title}» опубликован, но файл не удалось выгрузить в облако — он играет только с этого устройства`);
+      } else {
+        setMsg(`Трек «${t.title}» опубликован — у всех слушателей`);
+      }
       setTitle("");
       setFile(null);
       setFileDur(null);
@@ -359,7 +453,8 @@ function TrackForm() {
               <path d="M12 16V4m0 0 4 4m-4-4-4 4" />
               <path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" />
             </svg>
-            <span className="text-sm text-paper/60">{file ? file.name : "Нажмите, чтобы выбрать аудиофайл (MP3 / WAV / OGG)"}</span>
+            <span className="text-sm text-paper/60">{file ? file.name : "Нажмите, чтобы выбрать аудиофайл (MP3 / WAV / OGG, до 25 МБ)"}</span>
+            {fileErr && <span className="text-xs text-sky border border-blue/40 bg-blue/10 rounded-lg px-3 py-1.5">{fileErr}</span>}
             {fileDur && <span className="text-xs text-sky tabular-nums">длительность: {fmtTime(fileDur)}</span>}
             {reading && <span className="text-xs text-sky">Читаем метаданные…</span>}
             {!reading && metaInfo && <span className="text-xs text-paper/40">{metaInfo}</span>}
@@ -670,10 +765,19 @@ alter table public.platform_state enable row level security;
 create policy "ts_read" on public.platform_state for select using (true);
 create policy "ts_insert" on public.platform_state for insert with check (true);
 create policy "ts_update" on public.platform_state for update using (true) with check (true);
-alter publication supabase_realtime add table public.platform_state;`;
+alter publication supabase_realtime add table public.platform_state;
+
+-- хранилище аудиофайлов (треки играют на любом устройстве)
+insert into storage.buckets (id, name, public)
+values ('ts-audio', 'ts-audio', true)
+on conflict (id) do nothing;
+create policy "ts_audio_read" on storage.objects for select using (bucket_id = 'ts-audio');
+create policy "ts_audio_insert" on storage.objects for insert with check (bucket_id = 'ts-audio');
+create policy "ts_audio_update" on storage.objects for update using (bucket_id = 'ts-audio');
+create policy "ts_audio_delete" on storage.objects for delete using (bucket_id = 'ts-audio');`;
 
 function SyncTab() {
-  const { online, syncMode, reconnect } = useStore();
+  const { online, syncMode, reconnect, syncWarning } = useStore();
   const [url, setUrl] = useState("");
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
@@ -720,6 +824,11 @@ function SyncTab() {
 
   return (
     <div className="space-y-6">
+      {syncWarning && (
+        <div className="border border-blue/50 bg-blue/10 text-sky text-sm rounded-xl px-5 py-4 leading-relaxed">
+          {syncWarning}
+        </div>
+      )}
       <div className={`relative overflow-hidden border rounded-xl p-6 ${syncMode === "cloud" ? "border-blue/50 bg-gradient-to-br from-navy to-coal" : "border-line bg-coal/60"}`}>
         <div className="absolute inset-0 bg-scan opacity-40 pointer-events-none" />
         <div className="relative">
@@ -731,8 +840,8 @@ function SyncTab() {
           </div>
           <p className="mt-3 text-sm text-paper/55 leading-relaxed max-w-2xl">
             {syncMode === "cloud"
-              ? "Все изменения (треки, релизы, анонсы, новости, аккаунты, прослушивания) мгновенно видны каждому пользователю на любом устройстве. Онлайн-счётчик показывает реальных посетителей площадки прямо сейчас."
-              : "Данные сохраняются в этом браузере — другие устройства их не видят. Подключите бесплатный Supabase прямо здесь, без пересборки сайта, и площадка станет общей для всех."}
+              ? "Все изменения (треки, релизы, анонсы, новости, аккаунты, прослушивания) мгновенно видны каждому пользователю на любом устройстве. Аудиофайлы загруженных треков хранятся в бакете ts-audio и играют везде. Онлайн-счётчик показывает реальных посетителей площадки прямо сейчас."
+              : "Данные сохраняются в этом браузере — другие устройства их не видят, а загруженные аудиофайлы играют только здесь. Подключите бесплатный Supabase прямо здесь, без пересборки сайта, — и площадка станет общей для всех."}
           </p>
           <div className="mt-4 flex flex-wrap gap-6 text-sm">
             <div>
@@ -863,7 +972,8 @@ function AccessTab() {
           <h3 className="font-display font-bold text-sm tracking-wider uppercase">Пароль администратора</h3>
         </div>
         <p className="text-xs text-paper/40 -mt-1">
-          Сейчас действует: {admin ? "ваш собственный пароль" : `стартовый пароль (${DEFAULT_ADMIN_PASSWORD})`}. Новый пароль сохраняется в общем состоянии и работает на всех устройствах.
+          Пароль хранится только в виде хэша и никогда не отображается. Новый пароль сохраняется в общем состоянии
+          площадки и сразу работает на всех устройствах.
         </p>
         <div className="grid md:grid-cols-3 gap-4">
           <Field label="Текущий пароль">
@@ -1074,7 +1184,8 @@ function Dashboard() {
       <Reveal>
         <div className="mt-10 border border-line rounded-xl bg-coal/40 p-5 text-xs text-paper/35 leading-relaxed">
           Все изменения сохраняются и сразу видны слушателям: на главной, в музыке, в треках и на страницах артистов.
-          Аудиофайлы хранятся локально (IndexedDB), обложки — в общем состоянии площадки, синтезированные треки генерируются
+          Аудиофайлы хранятся локально (IndexedDB), а в облачном режиме дополнительно выгружаются в Supabase Storage —
+          тогда трек играет на любом устройстве. Обложки — в общем состоянии площадки, синтезированные треки генерируются
           звуковым движком TimurSounds в реальном времени. В облачном режиме всё это общее для каждого устройства.
         </div>
       </Reveal>
@@ -1085,6 +1196,7 @@ function Dashboard() {
 const resetRef: { current: () => void } = { current: () => undefined };
 
 export function Admin() {
-  const { isAdmin } = useStore();
-  return isAdmin ? <Dashboard /> : <Login />;
+  const { isAdmin, adminConfigured } = useStore();
+  if (isAdmin) return <Dashboard />;
+  return adminConfigured ? <Login /> : <Setup />;
 }

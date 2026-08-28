@@ -54,6 +54,21 @@ export function disconnectCloud() {
 export type SyncMode = "cloud" | "local";
 export const getSyncMode = (): SyncMode => (getCloudCfg() ? "cloud" : "local");
 
+/* ---------- предупреждения слоя синхронизации (видны в UI) ---------- */
+type WarnCb = (msg: string | null) => void;
+const warnListeners = new Set<WarnCb>();
+
+export function onSyncWarn(cb: WarnCb): () => void {
+  warnListeners.add(cb);
+  return () => {
+    warnListeners.delete(cb);
+  };
+}
+
+function emitWarn(msg: string | null) {
+  warnListeners.forEach((cb) => cb(msg));
+}
+
 const LS_KEY = "timursounds_state_v1";
 const SESSION_KEY = "timursounds_session";
 
@@ -133,11 +148,17 @@ class LocalSync implements SyncProvider {
   }
 
   read(): State {
+    let raw: string | null = null;
     try {
-      const raw = localStorage.getItem(LS_KEY);
+      raw = localStorage.getItem(LS_KEY);
       if (raw) return normalize(JSON.parse(raw));
     } catch {
-      /* повреждённые данные */
+      // повреждённые данные — сохраняем резервную копию, чтобы не потерять безвозвратно
+      try {
+        if (raw) localStorage.setItem(`${LS_KEY}_broken_backup`, raw);
+      } catch {
+        /* ignore */
+      }
     }
     return emptyState();
   }
@@ -145,8 +166,13 @@ class LocalSync implements SyncProvider {
   private save(s: State) {
     try {
       localStorage.setItem(LS_KEY, JSON.stringify(s));
+      emitWarn(null);
     } catch {
-      /* переполнение */
+      // QuotaExceededError: данные в памяти есть, но после перезагрузки страницы
+      // они будут утеряны — обязательно сообщаем пользователю.
+      emitWarn(
+        "Хранилище браузера переполнено: последние изменения не сохранятся после закрытия страницы. Удалите часть треков с обложками или подключите облачную синхронизацию."
+      );
     }
   }
 
@@ -219,16 +245,30 @@ class SupaSync implements SyncProvider {
   }
 
   async init(): Promise<State> {
-    const sb = await this.ensure();
-    let state = await this.fetchState(sb);
-    if (!state) {
-      // Первое подключение: поднимаем в облако контент этого устройства,
-      // чтобы уже загруженные треки и новости не потерялись.
+    let sb: SupabaseClient;
+    let state: State | null = null;
+    try {
+      sb = await this.ensure();
+      state = await this.fetchState(sb);
+      if (!state) {
+        // Первое подключение: поднимаем в облако контент этого устройства,
+        // чтобы уже загруженные треки и новости не потерялись.
+        state = this.local.read();
+        const hasContent = state.tracks.length > 0 || state.news.length > 0 || state.releases.length > 0;
+        const toPush = hasContent ? state : emptyState();
+        const { error } = await sb.from("platform_state").upsert({ id: 1, data: toPush });
+        if (error) throw new Error(error.message);
+        state = toPush;
+      }
+      emitWarn(null);
+    } catch (e) {
+      // Облако недоступно (неверный ключ, RLS, сеть): площадка продолжает
+      // работать на локальных данных, а админ видит причину в UI.
+      emitWarn(
+        `Облако Supabase недоступно (${e instanceof Error ? e.message : "ошибка соединения"}). Показаны данные этого браузера; изменения не синхронизируются, пока соединение не восстановится.`
+      );
       state = this.local.read();
-      const hasContent = state.tracks.length > 0 || state.news.length > 0 || state.releases.length > 0;
-      const toPush = hasContent ? state : emptyState();
-      await sb.from("platform_state").upsert({ id: 1, data: toPush });
-      state = toPush;
+      return state;
     }
 
     const ch = sb
@@ -279,13 +319,20 @@ class SupaSync implements SyncProvider {
   }
 
   async write(mutator: (s: State) => State): Promise<void> {
-    const sb = await this.ensure();
-    const base = (await this.fetchState(sb)) ?? this.local.read();
-    const next = mutator(base);
-    const { error } = await sb.from("platform_state").upsert({ id: 1, data: next });
-    if (error) throw new Error(error.message);
-    this.listeners.forEach((cb) => cb(next));
+    const next = mutator(this.local.read());
+    // локальная копия сохраняется всегда — данные не пропадут с этого устройства
     void this.local.write(() => next);
+    this.listeners.forEach((cb) => cb(next));
+    try {
+      const sb = await this.ensure();
+      const { error } = await sb.from("platform_state").upsert({ id: 1, data: next });
+      if (error) throw new Error(error.message);
+      emitWarn(null);
+    } catch (e) {
+      emitWarn(
+        `Не удалось сохранить изменения в облако (${e instanceof Error ? e.message : "ошибка соединения"}). Данные сохранены в этом браузере; повторная отправка произойдёт при следующем изменении.`
+      );
+    }
   }
 
   watchOnline(cb: (n: number) => void): () => void {
@@ -312,5 +359,50 @@ export async function testCloud(url: string, key: string): Promise<{ ok: boolean
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Не удалось подключиться" };
+  }
+}
+
+/* ---------- облачное хранилище аудиофайлов (Supabase Storage, бакет ts-audio) ---------- */
+const AUDIO_BUCKET = "ts-audio";
+
+async function storageClient() {
+  const cfg = getCloudCfg();
+  if (!cfg) return null;
+  const mod = await import("@supabase/supabase-js");
+  return mod.createClient(cfg.url, cfg.key);
+}
+
+/**
+ * Загружает аудиофайл в облако и возвращает публичный URL.
+ * Возвращает null, если облако не подключено или загрузка не удалась —
+ * тогда трек остаётся играбельным локально (IndexedDB).
+ */
+export async function uploadCloudAudio(trackId: string, file: File): Promise<string | null> {
+  try {
+    const sb = await storageClient();
+    if (!sb) return null;
+    const path = `${trackId}/${encodeURIComponent(file.name)}`;
+    const { error } = await sb.storage.from(AUDIO_BUCKET).upload(path, file, {
+      contentType: file.type || "audio/mpeg",
+      upsert: true,
+    });
+    if (error) throw new Error(error.message);
+    const { data } = sb.storage.from(AUDIO_BUCKET).getPublicUrl(path);
+    return data.publicUrl;
+  } catch {
+    return null;
+  }
+}
+
+/** Удаляет аудиофайл из облака при удалении трека (если он туда загружался). */
+export async function deleteCloudAudio(trackId: string): Promise<void> {
+  try {
+    const sb = await storageClient();
+    if (!sb) return;
+    const { data } = await sb.storage.from(AUDIO_BUCKET).list(trackId);
+    const paths = (data ?? []).map((f) => `${trackId}/${f.name}`);
+    if (paths.length) await sb.storage.from(AUDIO_BUCKET).remove(paths);
+  } catch {
+    /* файл в облаке не найден или нет доступа — не критично */
   }
 }

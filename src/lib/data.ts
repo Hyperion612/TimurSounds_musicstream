@@ -32,6 +32,8 @@ export interface Track {
   kind: "synth" | "file";
   addedAt: number;
   cover?: string; // dataURL своей обложки (из файла или из метаданных аудио)
+  /** Публичный URL аудио в облачном хранилище (Supabase Storage) — чтобы трек играл на любом устройстве. */
+  audioUrl?: string;
 }
 
 export interface NewsItem {
@@ -75,7 +77,7 @@ export interface State {
   upcoming: Upcoming[];
   plays: Record<string, number>;
   users: UserAccount[];
-  admin: AdminCreds | null; // null — действует стартовый пароль
+  admin: AdminCreds | null; // null — пароль ещё не создан: нужна первичная настройка в админке
 }
 
 export const STATE_VERSION = 1;

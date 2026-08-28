@@ -3,15 +3,16 @@ import type { ReactNode } from "react";
 import { emptyState } from "./data";
 import type { Artist, ArtistId, NewsItem, Release, State, Track, Upcoming, UserAccount } from "./data";
 import { delAudio } from "./db";
-import { createSync, getSyncMode } from "./sync";
+import { createSync, deleteCloudAudio, getSyncMode, onSyncWarn } from "./sync";
 import type { SyncMode, SyncProvider } from "./sync";
 
 const LS_AUTH = "ts_admin_authed";
 const LS_FAV = "ts_favs";
 const LS_USER = "ts_current_user";
 
-/** Стартовый пароль администратора — действует, пока в админке не задан новый. */
-export const DEFAULT_ADMIN_PASSWORD = "timursounds";
+// Пароль администратора нигде не хранится в открытом виде: в состоянии площадки
+// лежит только пара «соль + SHA-256-хэш». Пока запись не создана (admin === null),
+// админ-панель предлагает задать пароль при первом входе — дефолтного пароля нет.
 
 async function sha256(text: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
@@ -30,9 +31,15 @@ interface StoreCtx extends State {
   reconnect: () => void;
 
   isAdmin: boolean;
+  /** false, пока пароль администратора не создан при первом входе */
+  adminConfigured: boolean;
   login: (pw: string) => Promise<boolean>;
   logout: () => void;
+  /** Первичная настройка: создаёт хэш пароля (возвращает текст ошибки или null). */
+  setupAdmin: (pw: string, confirm: string) => Promise<string | null>;
   changeAdminPw: (oldPw: string, newPw: string) => Promise<string | null>;
+  /** Предупреждение слоя синхронизации (переполнение хранилища, облако недоступно и т.п.) */
+  syncWarning: string | null;
 
   currentUser: UserAccount | null;
   userLogin: (email: string, pw: string) => Promise<string | null>;
@@ -126,13 +133,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setProvider(createSync());
   }, []);
 
+  /* ---------- предупреждения синхронизации ---------- */
+  const [syncWarning, setSyncWarning] = useState<string | null>(null);
+  useEffect(() => onSyncWarn(setSyncWarning), []);
+
   /* ---------- админ ---------- */
   const verifyAdminPw = useCallback(async (pw: string): Promise<boolean> => {
     const admin = stateRef.current.admin;
-    if (!admin) return pw === DEFAULT_ADMIN_PASSWORD;
+    if (!admin) return false; // пароль ещё не создан — нужен первичный setup
     const h = await sha256(`${admin.salt}:${pw}`);
     return h === admin.hash;
   }, []);
+
+  const setupAdmin = useCallback(
+    async (pw: string, confirm: string): Promise<string | null> => {
+      if (stateRef.current.admin) return "Пароль уже создан — воспользуйтесь входом";
+      if (pw.length < 4) return "Пароль — минимум 4 символа";
+      if (pw !== confirm) return "Пароли не совпадают";
+      const salt = makeSalt();
+      const hash = await sha256(`${salt}:${pw}`);
+      mutateRef.current((s) => ({ ...s, admin: { salt, hash } }));
+      return null;
+    },
+    []
+  );
 
   const login = useCallback(
     async (pw: string): Promise<boolean> => {
@@ -268,6 +292,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       online,
       reconnect,
       isAdmin,
+      adminConfigured: state.admin !== null,
+      setupAdmin,
+      syncWarning,
       login,
       logout,
       changeAdminPw,
@@ -285,13 +312,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       artist: (id) => state.artists[id],
       addTrack: (t) => mutate((s) => ({ ...s, tracks: [t, ...s.tracks] })),
       deleteTrack: (id) => {
+        const t = stateRef.current.tracks.find((x) => x.id === id);
         mutate((s) => ({
           ...s,
-          tracks: s.tracks.filter((t) => t.id !== id),
+          tracks: s.tracks.filter((x) => x.id !== id),
           users: s.users.map((u) => ({ ...u, favs: u.favs.filter((x) => x !== id) })),
         }));
         setGuestFavs((f) => f.filter((x) => x !== id));
+        // целостность данных: вместе с треком удаляем аудиофайл из IndexedDB
+        // и из облачного хранилища (если он туда загружался)
         void delAudio(id);
+        if (t?.audioUrl) void deleteCloudAudio(id);
       },
       addRelease: (r) => mutate((s) => ({ ...s, releases: [r, ...s.releases] })),
       deleteRelease: (id) =>
@@ -315,7 +346,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       getRelease: (id) => state.releases.find((r) => r.id === id),
     }),
     [
-      state, ready, syncMode, online, reconnect, isAdmin, login, logout, changeAdminPw,
+      state, ready, syncMode, online, reconnect, isAdmin, setupAdmin, syncWarning, login, logout, changeAdminPw,
       currentUser, userLogin, userRegister, userLogout, deleteUser, favs, toggleFav, mutate,
     ]
   );
