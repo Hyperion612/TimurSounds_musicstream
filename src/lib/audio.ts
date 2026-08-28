@@ -337,7 +337,11 @@ export class FileSource implements Source {
     this.el.src = url;
     this.el.preload = "auto";
     this.el.addEventListener("ended", () => this.onEnded?.());
-    this.el.addEventListener("error", () => this.onError?.());
+    this.el.addEventListener("error", () => {
+      // MEDIA_ERR: 1=прервано, 2=сеть, 3=декодирование, 4=источник не поддерживается/недоступен
+      console.warn(`[TimurSounds] аудиоэлемент не смог открыть ${url} (код ${this.el.error?.code ?? "?"})`);
+      this.onError?.();
+    });
   }
 
   start(offset: number) {

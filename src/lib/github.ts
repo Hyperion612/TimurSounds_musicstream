@@ -115,7 +115,15 @@ export async function uploadGitHubAudio(trackId: string, file: File): Promise<st
     { method: "POST", headers: headers(cfg.token, file.type || "application/octet-stream"), body: file }
   );
   if (!res.ok) throw new Error(`GitHub отклонил загрузку файла (${res.status})`);
-  return downloadUrl(cfg, name);
+
+  // Контрольная проверка: публичная ссылка обязана открываться БЕЗ токена —
+  // иначе слушатели получат 404 (например, репозиторий приватный).
+  const pub = downloadUrl(cfg, name);
+  const check = await fetch(pub, { method: "GET", redirect: "follow" });
+  if (!check.ok) {
+    throw new Error(`файл загружен, но публичная ссылка отдаёт ${check.status} — репозиторий должен быть публичным`);
+  }
+  return pub;
 }
 
 /** Удаляет ассет трека из релиза (best effort). */
@@ -146,17 +154,22 @@ export async function deleteGitHubAudio(trackId: string, audioUrl?: string): Pro
 }
 
 /** Проверка доступа до сохранения конфигурации. */
-export async function testGitHub(owner: string, repo: string, token: string): Promise<{ ok: boolean; error?: string }> {
+export async function testGitHub(
+  owner: string,
+  repo: string,
+  token: string
+): Promise<{ ok: boolean; error?: string; isPrivate?: boolean; empty?: boolean }> {
   try {
     const o = owner.trim();
     const r = repo.trim();
     if (!o || !r || o.includes("/") || r.includes("/")) return { ok: false, error: "Проверьте владельца и репозиторий" };
     const res = await fetch(`https://api.github.com/repos/${o}/${r}`, { headers: headers(token.trim()) });
     if (res.status === 401) return { ok: false, error: "Токен недействителен (401)" };
-    if (res.status === 403) return { ok: false, error: "Токену не хватает прав (403)" };
+    if (res.status === 403) return { ok: false, error: "Токену не хватает прав — нужно Contents: Read and write (403)" };
     if (res.status === 404) return { ok: false, error: "Репозиторий не найден или токен без доступа к нему (404)" };
     if (!res.ok) return { ok: false, error: `GitHub API: ${res.status}` };
-    return { ok: true };
+    const j = (await res.json()) as { private?: boolean; size?: number };
+    return { ok: true, isPrivate: !!j.private, empty: (j.size ?? 1) === 0 };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Не удалось связаться с GitHub" };
   }

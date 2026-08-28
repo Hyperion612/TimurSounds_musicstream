@@ -97,32 +97,37 @@ export async function testR2(signUrlRaw: string): Promise<{ ok: boolean; error?:
  * Загружает аудиофайл в облако (R2 → Supabase Storage).
  * Возвращает публичный URL или null, если облако не подключено/ошиблось.
  */
-export async function uploadRemoteAudio(trackId: string, file: File): Promise<{ url: string | null; backend: AudioBackend }> {
+export async function uploadRemoteAudio(
+  trackId: string,
+  file: File
+): Promise<{ url: string | null; backend: AudioBackend; error?: string }> {
   // R2 → GitHub Releases → Supabase Storage → локально.
   // Локальная копия в IndexedDB сохранена всегда — трек не пропадёт в любом случае.
+  let error: string | undefined;
   if (getR2Cfg()) {
     try {
       return { url: await uploadR2Audio(trackId, file), backend: "r2" };
-    } catch {
-      /* пробуем запасной вариант ниже */
+    } catch (e) {
+      error = `R2: ${e instanceof Error ? e.message : "ошибка загрузки"}`;
     }
   }
   if (getGhCfg()) {
     try {
       return { url: await uploadGitHubAudio(trackId, file), backend: "github" };
-    } catch {
-      /* пробуем запасной вариант ниже */
+    } catch (e) {
+      error = `GitHub: ${e instanceof Error ? e.message : "ошибка загрузки"}`;
     }
   }
   if (getSyncMode() === "cloud") {
     try {
       const url = await uploadCloudAudio(trackId, file);
       if (url) return { url, backend: "supabase" };
-    } catch {
-      /* локальная копия уже сохранена — трек не пропадёт */
+      error = "Supabase Storage не вернул ссылку на файл";
+    } catch (e) {
+      error = `Supabase: ${e instanceof Error ? e.message : "ошибка загрузки"}`;
     }
   }
-  return { url: null, backend: "local" };
+  return { url: null, backend: "local", error };
 }
 
 /** Удаляет облачное аудио трека из того бэкенда, где оно лежит. */

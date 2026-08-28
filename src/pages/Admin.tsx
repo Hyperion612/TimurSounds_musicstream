@@ -266,9 +266,11 @@ function TrackForm() {
   const [msg, setMsg] = useState("");
   const [previewing, setPreviewing] = useState(false);
   const previewRef = useRef<SynthSource | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const onFile = (f: File | null) => {
     setFileErr("");
+    if (f) setMode("file"); // выбран файл — публикуем именно его, а не синтез
     if (f) {
       if (!f.type.startsWith("audio/") && !/\.(mp3|wav|ogg|m4a|aac|flac)$/i.test(f.name)) {
         setFileErr("Файл не похож на аудио — выберите MP3 / WAV / OGG");
@@ -347,11 +349,12 @@ function TrackForm() {
     try {
       let audioUrl: string | undefined;
       let uploadedTo: string | null = null;
+      let up: Awaited<ReturnType<typeof uploadRemoteAudio>> = { url: null, backend: "local" };
       if (mode === "file" && file) {
         // локальная копия (IndexedDB) — трек играет на этом устройстве всегда
         await putAudio(id, file);
-        // облачная копия (R2 → Supabase Storage) — трек играет на любом устройстве
-        const up = await uploadRemoteAudio(id, file);
+        // облачная копия (R2 → GitHub → Supabase Storage) — трек играет на любом устройстве
+        up = await uploadRemoteAudio(id, file);
         audioUrl = up.url ?? undefined;
         uploadedTo = up.url
           ? up.backend === "r2"
@@ -377,7 +380,11 @@ function TrackForm() {
       };
       addTrack(t);
       if (t.kind === "file" && !audioUrl) {
-        setMsg(`Трек «${t.title}» опубликован, но файл не удалось выгрузить в облако — он играет только с этого устройства`);
+        setMsg(
+          up.error
+            ? `Трек «${t.title}» опубликован, но ${up.error}. Файл играет только с этого устройства.`
+            : `Трек «${t.title}» опубликован, но файл не удалось выгрузить в облако — он играет только с этого устройства`
+        );
       } else if (uploadedTo === "Cloudflare R2") {
         setMsg(`Трек «${t.title}» опубликован — аудио в Cloudflare R2, играет быстро у всех слушателей`);
       } else if (uploadedTo === "GitHub Releases") {
@@ -437,9 +444,27 @@ function TrackForm() {
           <button type="button" onClick={() => setMode("synth")} className={`${mode === "synth" ? "bg-blue border-blue text-paper" : "border-line text-paper/55 hover:text-paper"} font-display text-[11px] font-bold tracking-wider px-4 py-2.5 rounded-lg border transition-all`}>
             СИНТЕЗ TIMURSOUNDS
           </button>
-          <button type="button" onClick={() => setMode("file")} className={`${mode === "file" ? "bg-blue border-blue text-paper" : "border-line text-paper/55 hover:text-paper"} font-display text-[11px] font-bold tracking-wider px-4 py-2.5 rounded-lg border transition-all`}>
+          <button
+            type="button"
+            onClick={() => {
+              setMode("file");
+              // сразу предлагаем выбрать файл — меньше шансов опубликовать «синтез» по ошибке
+              fileInputRef.current?.click();
+            }}
+            className={`${mode === "file" ? "bg-blue border-blue text-paper" : "border-line text-paper/55 hover:text-paper"} font-display text-[11px] font-bold tracking-wider px-4 py-2.5 rounded-lg border transition-all`}
+          >
             АУДИОФАЙЛ
           </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="audio/*"
+            className="hidden"
+            onChange={(e) => {
+              onFile(e.target.files?.[0] ?? null);
+              e.target.value = ""; // тот же файл можно выбрать повторно
+            }}
+          />
         </div>
       </div>
 
@@ -851,6 +876,19 @@ function StorageSection() {
     const res = await testGitHub(ghOwner, ghRepo, ghToken);
     if (!res.ok) {
       setGhMsg({ ok: false, text: res.error ?? "Проверьте данные и права токена" });
+      setGhBusy(false);
+      return;
+    }
+    if (res.isPrivate) {
+      setGhMsg({
+        ok: false,
+        text: "Репозиторий приватный — треки загрузятся, но слушатели без токена не смогут их открыть (будет играть генеративный звук). Сделайте репозиторий публичным: Settings → General → Danger Zone → Change visibility, затем повторите.",
+      });
+      setGhBusy(false);
+      return;
+    }
+    if (res.empty) {
+      setGhMsg({ ok: false, text: "В репозитории нет ни одного коммита — GitHub не даст создать релиз. Добавьте файл (например README.md) и повторите." });
       setGhBusy(false);
       return;
     }

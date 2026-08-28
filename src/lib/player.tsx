@@ -99,6 +99,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     // Резервный генеративный звук: трек обязан зазвучать, даже если файл
     // не долетел (сеть, CORS, повреждённый blob) или старт бросил исключение.
     const synthFallback = () => {
+      console.warn(`[TimurSounds] аудиофайл трека «${t.title}» недоступен (${t.audioUrl ?? "локальный blob не найден"}) — включён генеративный звук`);
+      window.dispatchEvent(new CustomEvent("ts-audio-fallback", { detail: { title: t.title } }));
       if (tokenRef.current !== token) return;
       if (srcRef.current) {
         srcRef.current.onEnded = null;

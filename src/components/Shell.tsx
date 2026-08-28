@@ -52,9 +52,26 @@ export function Shell() {
   const loc = useLocation();
   const { artist, syncMode, currentUser, userLogout, favs, syncWarning } = useStore();
   const [authOpen, setAuthOpen] = useState(false);
+  const [fallbackTitle, setFallbackTitle] = useState<string | null>(null);
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, [loc.pathname]);
+
+  /* уведомление о переключении на генеративный звук (аудиофайл недоступен) */
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onFallback = (e: Event) => {
+      const title = (e as CustomEvent<{ title?: string }>).detail?.title ?? "трек";
+      setFallbackTitle(title);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => setFallbackTitle(null), 6000);
+    };
+    window.addEventListener("ts-audio-fallback", onFallback);
+    return () => {
+      window.removeEventListener("ts-audio-fallback", onFallback);
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
 
   const accountBlock = currentUser ? (
     <div className="flex items-center gap-3 px-2 py-1">
@@ -176,6 +193,15 @@ export function Shell() {
         )}
         <Outlet />
       </main>
+
+      {fallbackTitle && (
+        <div className="fixed bottom-24 lg:bottom-28 inset-x-0 z-50 flex justify-center px-4 pointer-events-none">
+          <div className="pointer-events-auto max-w-md w-full sm:w-auto border border-blue/50 bg-navy text-sm text-paper rounded-xl px-5 py-3.5 shadow-[0_18px_50px_-12px_rgba(31,91,255,0.45)]">
+            <span className="font-semibold">Аудиофайл «{fallbackTitle}» сейчас недоступен</span>
+            <span className="text-paper/60"> — играет генеративная версия трека. Подключите облачное хранилище в админке, чтобы файл слышали все.</span>
+          </div>
+        </div>
+      )}
 
       <PlayerBar />
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
