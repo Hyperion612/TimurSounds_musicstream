@@ -348,21 +348,13 @@ function TrackForm() {
     const id = `u${Date.now().toString(36)}`;
     try {
       let audioUrl: string | undefined;
-      let uploadedTo: string | null = null;
-      let up: Awaited<ReturnType<typeof uploadRemoteAudio>> = { url: null, backend: "local" };
+      let up: Awaited<ReturnType<typeof uploadRemoteAudio>> = { url: null, shared: false, backend: "local" };
       if (mode === "file" && file) {
         // локальная копия (IndexedDB) — трек играет на этом устройстве всегда
         await putAudio(id, file);
-        // облачная копия (R2 → GitHub → Supabase Storage) — трек играет на любом устройстве
+        // облачная копия (R2 → GitHub → общее облако Supabase) — трек играет на любом устройстве
         up = await uploadRemoteAudio(id, file);
         audioUrl = up.url ?? undefined;
-        uploadedTo = up.url
-          ? up.backend === "r2"
-            ? "Cloudflare R2"
-            : up.backend === "github"
-              ? "GitHub Releases"
-              : "Supabase Storage"
-          : null;
       }
       const t: Track = {
         id,

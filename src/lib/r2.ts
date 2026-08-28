@@ -8,7 +8,7 @@
  *    файлы попадают в релиз, раздача — публичные ссылки через CDN GitHub.
  */
 
-import { deleteCloudAudio, getSyncMode, uploadCloudAudio } from "./sync";
+import { deleteCloudAudio, deleteStateAudio, getSyncMode, uploadCloudAudio, uploadStateAudio } from "./sync";
 import { deleteGitHubAudio, getGhCfg, uploadGitHubAudio } from "./github";
 
 export interface R2Cfg {
@@ -39,7 +39,7 @@ export function clearR2Cfg() {
   localStorage.removeItem(LS_R2);
 }
 
-export type AudioBackend = "r2" | "github" | "supabase" | "local";
+export type AudioBackend = "r2" | "github" | "state" | "supabase" | "local";
 
 export function audioBackend(): AudioBackend {
   if (getR2Cfg()) return "r2";
@@ -100,34 +100,41 @@ export async function testR2(signUrlRaw: string): Promise<{ ok: boolean; error?:
 export async function uploadRemoteAudio(
   trackId: string,
   file: File
-): Promise<{ url: string | null; backend: AudioBackend; error?: string }> {
-  // R2 → GitHub Releases → Supabase Storage → локально.
+): Promise<{ url: string | null; shared: boolean; backend: AudioBackend; error?: string }> {
+  // R2 → GitHub Releases → общее облако данных Supabase → Supabase Storage → локально.
   // Локальная копия в IndexedDB сохранена всегда — трек не пропадёт в любом случае.
   let error: string | undefined;
   if (getR2Cfg()) {
     try {
-      return { url: await uploadR2Audio(trackId, file), backend: "r2" };
+      return { url: await uploadR2Audio(trackId, file), shared: true, backend: "r2" };
     } catch (e) {
       error = `R2: ${e instanceof Error ? e.message : "ошибка загрузки"}`;
     }
   }
   if (getGhCfg()) {
     try {
-      return { url: await uploadGitHubAudio(trackId, file), backend: "github" };
+      return { url: await uploadGitHubAudio(trackId, file), shared: true, backend: "github" };
     } catch (e) {
       error = `GitHub: ${e instanceof Error ? e.message : "ошибка загрузки"}`;
     }
   }
   if (getSyncMode() === "cloud") {
+    // Общее облако данных: работает без бакетов и токенов — раз данные синхронизируются,
+    // то и аудио теперь будет доступно на всех устройствах.
+    try {
+      if (await uploadStateAudio(trackId, file)) return { url: null, shared: true, backend: "state" };
+      error = "общее облако Supabase не приняло аудиофайл";
+    } catch (e) {
+      error = `общее облако: ${e instanceof Error ? e.message : "ошибка загрузки"}`;
+    }
     try {
       const url = await uploadCloudAudio(trackId, file);
-      if (url) return { url, backend: "supabase" };
-      error = "Supabase Storage не вернул ссылку на файл";
-    } catch (e) {
-      error = `Supabase: ${e instanceof Error ? e.message : "ошибка загрузки"}`;
+      if (url) return { url, shared: true, backend: "supabase" };
+    } catch {
+      /* бакет Storage может отсутствовать — общее облако выше уже попробовано */
     }
   }
-  return { url: null, backend: "local", error };
+  return { url: null, shared: false, backend: "local", error };
 }
 
 /** Удаляет облачное аудио трека из того бэкенда, где оно лежит. */

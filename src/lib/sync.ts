@@ -406,3 +406,78 @@ export async function deleteCloudAudio(trackId: string): Promise<void> {
     /* файл в облаке не найден или нет доступа — не критично */
   }
 }
+
+/* ---------- общее аудио в самой базе Supabase (строка id=2 таблицы platform_state) ----------
+ * Работает без бакетов, воркеров и токенов: достаточно подключённого облака данных.
+ * data = { [trackId]: "data:audio/...;base64,..." }
+ * Слушатель скачивает только свой трек (PostgREST-оператор ->>), вся карта — только при записи.
+ */
+const AUDIO_ROW_ID = 2;
+
+async function readAudioMap(sb: Awaited<ReturnType<typeof storageClient>>): Promise<Record<string, string>> {
+  if (!sb) return {};
+  const { data } = await sb.from("platform_state").select("data").eq("id", AUDIO_ROW_ID).maybeSingle();
+  const row = data as { data?: unknown } | null;
+  return row && row.data && typeof row.data === "object" ? (row.data as Record<string, string>) : {};
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(new Error("не удалось прочитать файл"));
+    r.readAsDataURL(blob);
+  });
+}
+
+/**
+ * Кладёт аудио трека в общее облако данных. Возвращает true при успехе.
+ * Если облако не подключено — false (трек остаётся локальным).
+ */
+export async function uploadStateAudio(trackId: string, blob: Blob): Promise<boolean> {
+  try {
+    const sb = await storageClient();
+    if (!sb) return false;
+    if (blob.size > 12 * 1024 * 1024) {
+      console.warn(`[TimurSounds] аудио ${trackId} больше 12 МБ — общее хранилище может работать медленно, рекомендуется GitHub Releases / R2`);
+    }
+    const dataUrl = await blobToDataUrl(blob);
+    const map = await readAudioMap(sb);
+    map[trackId] = dataUrl;
+    const { error } = await sb.from("platform_state").upsert({ id: AUDIO_ROW_ID, data: map });
+    if (error) throw new Error(error.message);
+    return true;
+  } catch (e) {
+    console.warn("[TimurSounds] не удалось сохранить аудио в общее облако:", e);
+    return false;
+  }
+}
+
+/** Скачивает аудио трека из общего облака (только один трек, не всю карту). */
+export async function fetchStateAudio(trackId: string): Promise<string | null> {
+  try {
+    const sb = await storageClient();
+    if (!sb) return null;
+    if (!/^[a-zA-Z0-9_-]+$/.test(trackId)) return null;
+    const { data } = await sb.from("platform_state").select(`audio:data->>${trackId}`).eq("id", AUDIO_ROW_ID).maybeSingle();
+    const row = data as Record<string, unknown> | null;
+    const val = row ? Object.values(row)[0] : null;
+    return typeof val === "string" && val.startsWith("data:audio") ? val : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Удаляет аудио трека из общего облака данных. */
+export async function deleteStateAudio(trackId: string): Promise<void> {
+  try {
+    const sb = await storageClient();
+    if (!sb) return;
+    const map = await readAudioMap(sb);
+    if (!(trackId in map)) return;
+    delete map[trackId];
+    await sb.from("platform_state").upsert({ id: AUDIO_ROW_ID, data: map });
+  } catch {
+    /* best effort */
+  }
+}
