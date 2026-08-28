@@ -8,6 +8,7 @@ import { imageToCoverDataUrl, readAudioMeta } from "../lib/media";
 import { useStore } from "../lib/store";
 import { configureCloud, disconnectCloud, testCloud } from "../lib/sync";
 import { audioBackend, clearR2Cfg, getR2Cfg, setR2Cfg, testR2, uploadRemoteAudio } from "../lib/r2";
+import { clearGhCfg, getGhCfg, setGhCfg, testGitHub } from "../lib/github";
 import { Countdown, Cover, Reveal } from "../components/ui";
 import { PauseIcon, PlayIcon } from "../components/cards";
 
@@ -352,7 +353,13 @@ function TrackForm() {
         // облачная копия (R2 → Supabase Storage) — трек играет на любом устройстве
         const up = await uploadRemoteAudio(id, file);
         audioUrl = up.url ?? undefined;
-        uploadedTo = up.url ? (up.backend === "r2" ? "Cloudflare R2" : "Supabase Storage") : null;
+        uploadedTo = up.url
+          ? up.backend === "r2"
+            ? "Cloudflare R2"
+            : up.backend === "github"
+              ? "GitHub Releases"
+              : "Supabase Storage"
+          : null;
       }
       const t: Track = {
         id,
@@ -373,6 +380,8 @@ function TrackForm() {
         setMsg(`Трек «${t.title}» опубликован, но файл не удалось выгрузить в облако — он играет только с этого устройства`);
       } else if (uploadedTo === "Cloudflare R2") {
         setMsg(`Трек «${t.title}» опубликован — аудио в Cloudflare R2, играет быстро у всех слушателей`);
+      } else if (uploadedTo === "GitHub Releases") {
+        setMsg(`Трек «${t.title}» опубликован — аудио в GitHub Releases, играет у всех слушателей`);
       } else {
         setMsg(`Трек «${t.title}» опубликован — у всех слушателей`);
       }
@@ -813,30 +822,59 @@ export default {
 };`;
 
 function StorageSection() {
+  /* GitHub Releases */
+  const [ghOwner, setGhOwner] = useState(() => getGhCfg()?.owner ?? "");
+  const [ghRepo, setGhRepo] = useState(() => getGhCfg()?.repo ?? "");
+  const [ghToken, setGhToken] = useState(() => getGhCfg()?.token ?? "");
+  const [ghTag, setGhTag] = useState(() => getGhCfg()?.tag ?? "audio-storage");
+  const [ghBusy, setGhBusy] = useState(false);
+  const [ghMsg, setGhMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  /* Cloudflare R2 (альтернатива) */
   const [signUrl, setSignUrl] = useState(() => getR2Cfg()?.signUrl ?? "");
   const [publicBase, setPublicBase] = useState(() => getR2Cfg()?.publicBase ?? "");
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [r2Busy, setR2Busy] = useState(false);
+  const [r2Msg, setR2Msg] = useState<{ ok: boolean; text: string } | null>(null);
   const [copied, setCopied] = useState(false);
-  const cfg = getR2Cfg();
-  const backend = audioBackend();
 
-  const connect = async () => {
-    if (busy) return;
-    if (!signUrl.trim() || !publicBase.trim()) {
-      setMsg({ ok: false, text: "Нужны и URL воркера, и публичный URL бакета" });
+  const backend = audioBackend();
+  const ghActive = !!getGhCfg();
+  const r2Active = !!getR2Cfg();
+
+  const connectGh = async () => {
+    if (ghBusy) return;
+    if (!ghOwner.trim() || !ghRepo.trim() || !ghToken.trim()) {
+      setGhMsg({ ok: false, text: "Нужны владелец, репозиторий и токен" });
       return;
     }
-    setBusy(true);
+    setGhBusy(true);
+    const res = await testGitHub(ghOwner, ghRepo, ghToken);
+    if (!res.ok) {
+      setGhMsg({ ok: false, text: res.error ?? "Проверьте данные и права токена" });
+      setGhBusy(false);
+      return;
+    }
+    setGhCfg({ owner: ghOwner.trim(), repo: ghRepo.trim(), token: ghToken.trim(), tag: ghTag.trim() || "audio-storage" });
+    setGhMsg({ ok: true, text: `GitHub Releases подключён — аудио загружается в ${ghOwner.trim()}/${ghRepo.trim()}` });
+    setGhBusy(false);
+  };
+
+  const connectR2 = async () => {
+    if (r2Busy) return;
+    if (!signUrl.trim() || !publicBase.trim()) {
+      setR2Msg({ ok: false, text: "Нужны и URL воркера, и публичный URL бакета" });
+      return;
+    }
+    setR2Busy(true);
     const res = await testR2(signUrl);
     if (!res.ok) {
-      setMsg({ ok: false, text: `Воркер не отвечает: ${res.error ?? "проверьте адрес и деплой"}` });
-      setBusy(false);
+      setR2Msg({ ok: false, text: `Воркер не отвечает: ${res.error ?? "проверьте адрес и деплой"}` });
+      setR2Busy(false);
       return;
     }
     setR2Cfg({ signUrl: signUrl.trim(), publicBase: publicBase.trim() });
-    setMsg({ ok: true, text: `Cloudflare R2 подключён (бакет «${res.error ?? "ts-audio"}») — аудио загружается в CDN` });
-    setBusy(false);
+    setR2Msg({ ok: true, text: `Cloudflare R2 подключён (бакет «${res.error ?? "ts-audio"}»)` });
+    setR2Busy(false);
   };
 
   const copyWorker = async () => {
@@ -850,28 +888,41 @@ function StorageSection() {
   };
 
   return (
-    <div className="border border-line rounded-xl bg-coal/60 p-6 space-y-5">
+    <div className="border border-line rounded-xl bg-coal/60 p-6 space-y-6">
       <div className="flex flex-wrap items-center gap-3">
         <span className="w-5 h-[3px] bg-blue" />
-        <h3 className="font-display font-bold text-sm tracking-wider uppercase">Хранилище аудио · Cloudflare R2</h3>
-        <span className={`ml-auto text-[10px] font-display font-bold tracking-[0.2em] px-2.5 py-1.5 rounded border ${backend === "r2" ? "bg-blue/15 border-blue/50 text-sky" : "border-line text-paper/40"}`}>
-          {backend === "r2" ? "R2 АКТИВЕН" : backend === "supabase" ? "SUPABASE STORAGE" : "ЛОКАЛЬНО"}
+        <h3 className="font-display font-bold text-sm tracking-wider uppercase">Хранилище аудио</h3>
+        <span className={`ml-auto text-[10px] font-display font-bold tracking-[0.2em] px-2.5 py-1.5 rounded border ${
+          backend === "r2" || backend === "github" ? "bg-blue/15 border-blue/50 text-sky" : "border-line text-paper/40"
+        }`}>
+          {backend === "r2" ? "R2 АКТИВЕН" : backend === "github" ? "GITHUB АКТИВЕН" : backend === "supabase" ? "SUPABASE STORAGE" : "ЛОКАЛЬНО"}
         </span>
       </div>
       <p className="text-sm text-paper/55 leading-relaxed max-w-2xl">
-        Аудиофайлы загруженных треков раздаёт Cloudflare R2: ближайший к слушателю CDN-узел, нулевой egress и быстрый
-        первый байт — треки стартуют заметно быстрее, чем с Supabase Storage. База и realtime остаются в Supabase.
-        Секретные ключи R2 живут только в воркере и никогда не попадают в браузер.
+        Здесь выбирается, где лежат аудиофайлы треков — чтобы они быстро играли у всех слушателей, а не только у вас.
+        Приоритет: R2 → GitHub Releases → Supabase Storage → локальный IndexedDB. Скачать файл может любой,
+        загрузка идёт с подтверждением доступа.
       </p>
 
-      {backend !== "r2" && (
-        <>
-          <ol className="space-y-2.5 text-sm text-paper/60 leading-relaxed list-none">
+      {/* ---------- GitHub Releases ---------- */}
+      <div className={`relative overflow-hidden border rounded-xl p-5 ${ghActive || backend === "github" ? "border-blue/50 bg-gradient-to-br from-navy to-coal" : "border-line bg-ink/40"}`}>
+        <div className="flex flex-wrap items-center gap-3 mb-3">
+          <span className="font-display font-bold text-sm tracking-wider uppercase">GitHub Releases</span>
+          <span className="text-[10px] font-display font-bold tracking-[0.2em] bg-blue text-paper px-2 py-1 rounded">РЕКОМЕНДУЕМ</span>
+          {ghActive && <span className="text-[10px] tracking-[0.2em] text-sky border border-blue/40 rounded px-2 py-1">ПОДКЛЮЧЕН</span>}
+        </div>
+        <p className="text-sm text-paper/55 leading-relaxed max-w-2xl mb-4">
+          Самый простой вариант: файлы до 2 ГБ бесплатно, раздача через CDN GitHub, не нужны воркеры и серверы.
+          Треки попадают в релиз <span className="text-sky">{ghTag || "audio-storage"}</span> репозитория,
+          а слушатели качают их по публичным ссылкам — без токена.
+        </p>
+
+        {!ghActive && (
+          <ol className="space-y-2.5 text-sm text-paper/60 leading-relaxed list-none mb-5">
             {[
-              <>В Cloudflare создайте бакет R2 с именем <span className="text-sky">ts-audio</span> и включите публичный доступ (R2 → бакет → Public access → r2.dev subdomain).</>,
-              <>Создайте API-токен (R2 → Manage R2 API Tokens → тип «Object Read & Write», бакет ts-audio).</>,
-              <>Разверните воркер: <span className="text-sky">cd cloudflare-r2 && wrangler deploy</span>, затем <span className="text-sky">wrangler secret put R2_ACCESS_KEY_ID</span> и <span className="text-sky">wrangler secret put R2_SECRET_ACCESS_KEY</span>. Код воркера и wrangler.toml — в папке cloudflare-r2 репозитория (кнопка ниже копирует код).</>,
-              <>Впишите URL воркера (<span className="text-sky">https://…workers.dev</span>) и публичный URL бакета (<span className="text-sky">https://pub-…r2.dev</span>) в поля ниже и сохраните. Пересборка сайта не нужна.</>,
+              <>Создайте отдельный <span className="text-sky">публичный</span> репозиторий под аудио (например <span className="text-sky">timursounds-audio</span>) — загрузка идёт по токену, а слушатели скачивают треки по публичным ссылкам без всяких ключей.</>,
+              <>Создайте fine-grained токен: GitHub → Settings → Developer settings → Fine-grained tokens → Generate. Repository access — только этот репозиторий, Permissions → Repository permissions → <span className="text-sky">Contents: Read and write</span>.</>,
+              <>Вставьте владельца, репозиторий и токен ниже и нажмите «Проверить и подключить». Токен хранится только в вашем браузере.</>,
             ].map((step, i) => (
               <li key={i} className="flex gap-3">
                 <span className="shrink-0 w-6 h-6 rounded bg-blue/15 border border-blue/40 text-sky font-display font-bold text-xs flex items-center justify-center">{i + 1}</span>
@@ -879,39 +930,89 @@ function StorageSection() {
               </li>
             ))}
           </ol>
-          <button onClick={() => void copyWorker()} className={btnGhost}>
-            {copied ? "КОД ВОРКЕРА СКОПИРОВАН" : "СКОПИРОВАТЬ КОД ВОРКЕРА (worker.js)"}
-          </button>
-        </>
-      )}
-
-      <div className="grid md:grid-cols-2 gap-4">
-        <Field label="URL воркера (пресайн)">
-          <input value={signUrl} onChange={(e) => setSignUrl(e.target.value)} placeholder="https://timursounds-r2-sign.user.workers.dev" className={inputCls} />
-        </Field>
-        <Field label="Публичный URL бакета">
-          <input value={publicBase} onChange={(e) => setPublicBase(e.target.value)} placeholder="https://pub-xxxxxxxx.r2.dev" className={inputCls} />
-        </Field>
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <button onClick={() => void connect()} disabled={busy} className={btnPrimary}>
-          {busy ? "ПРОВЕРКА…" : cfg ? "ОБНОВИТЬ НАСТРОЙКИ" : "ПРОВЕРИТЬ И ПОДКЛЮЧИТЬ R2"}
-        </button>
-        {cfg && (
-          <button
-            onClick={() => {
-              if (window.confirm("Отключить R2? Новые загрузки пойдут в Supabase Storage (если подключён) или останутся локальными.")) {
-                clearR2Cfg();
-                setMsg({ ok: true, text: "R2 отключён" });
-              }
-            }}
-            className={btnGhost}
-          >
-            ОТКЛЮЧИТЬ R2
-          </button>
         )}
-        {msg && <span className={msgCls}>{msg.text}</span>}
+
+        <div className="grid md:grid-cols-2 gap-4">
+          <Field label="Владелец (username / организация)">
+            <input value={ghOwner} onChange={(e) => setGhOwner(e.target.value)} placeholder="Hyperion612" className={inputCls} />
+          </Field>
+          <Field label="Репозиторий">
+            <input value={ghRepo} onChange={(e) => setGhRepo(e.target.value)} placeholder="timursounds-audio" className={inputCls} />
+          </Field>
+          <Field label="Токен (fine-grained PAT)">
+            <input type="password" value={ghToken} onChange={(e) => setGhToken(e.target.value)} placeholder="github_pat_…" className={inputCls} />
+          </Field>
+          <Field label="Тег релиза">
+            <input value={ghTag} onChange={(e) => setGhTag(e.target.value)} placeholder="audio-storage" className={inputCls} />
+          </Field>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 mt-4">
+          <button onClick={() => void connectGh()} disabled={ghBusy} className={btnPrimary}>
+            {ghBusy ? "ПРОВЕРКА…" : ghActive ? "ОБНОВИТЬ НАСТРОЙКИ" : "ПРОВЕРИТЬ И ПОДКЛЮЧИТЬ GITHUB"}
+          </button>
+          {ghActive && (
+            <button
+              onClick={() => {
+                if (window.confirm("Отключить GitHub Releases? Уже загруженные треки продолжат играть со своих ссылок, новые пойдут в следующее по приоритету хранилище.")) {
+                  clearGhCfg();
+                  setGhMsg({ ok: true, text: "GitHub отключён" });
+                }
+              }}
+              className={btnGhost}
+            >
+              ОТКЛЮЧИТЬ GITHUB
+            </button>
+          )}
+          {ghMsg && <span className={msgCls}>{ghMsg.text}</span>}
+        </div>
       </div>
+
+      {/* ---------- R2 (альтернатива) ---------- */}
+      <details className="group border border-line rounded-xl">
+        <summary className="cursor-pointer list-none px-5 py-4 flex items-center gap-3 hover:bg-white/[0.03] transition-colors rounded-xl">
+          <svg width="14" height="14" viewBox="0 0 16 16" className="text-paper/40 transition-transform group-open:rotate-90" aria-hidden>
+            <path d="M5 3l6 5-6 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="font-display font-bold text-sm tracking-wider uppercase">Cloudflare R2 · альтернатива</span>
+          {r2Active && <span className="text-[10px] tracking-[0.2em] text-sky border border-blue/40 rounded px-2 py-1 ml-auto">ПОДКЛЮЧЕН</span>}
+        </summary>
+        <div className="px-5 pb-5 space-y-4">
+          <p className="text-sm text-paper/55 leading-relaxed max-w-2xl">
+            Быстрее первого байта (ближайший CDN-узел Cloudflare), но требует развернуть маленький воркер.
+            Секретные ключи R2 живут только в воркере и не попадают в браузер.
+          </p>
+          <div className="grid md:grid-cols-2 gap-4">
+            <Field label="URL воркера (пресайн)">
+              <input value={signUrl} onChange={(e) => setSignUrl(e.target.value)} placeholder="https://timursounds-r2-sign.user.workers.dev" className={inputCls} />
+            </Field>
+            <Field label="Публичный URL бакета">
+              <input value={publicBase} onChange={(e) => setPublicBase(e.target.value)} placeholder="https://pub-xxxxxxxx.r2.dev" className={inputCls} />
+            </Field>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <button onClick={() => void connectR2()} disabled={r2Busy} className={btnPrimary}>
+              {r2Busy ? "ПРОВЕРКА…" : r2Active ? "ОБНОВИТЬ НАСТРОЙКИ" : "ПРОВЕРИТЬ И ПОДКЛЮЧИТЬ R2"}
+            </button>
+            {r2Active && (
+              <button
+                onClick={() => {
+                  if (window.confirm("Отключить R2?")) {
+                    clearR2Cfg();
+                    setR2Msg({ ok: true, text: "R2 отключён" });
+                  }
+                }}
+                className={btnGhost}
+              >
+                ОТКЛЮЧИТЬ R2
+              </button>
+            )}
+            <button onClick={() => void copyWorker()} className={btnGhost}>
+              {copied ? "КОД СКОПИРОВАН" : "КОД ВОРКЕРА"}
+            </button>
+            {r2Msg && <span className={msgCls}>{r2Msg.text}</span>}
+          </div>
+        </div>
+      </details>
     </div>
   );
 }

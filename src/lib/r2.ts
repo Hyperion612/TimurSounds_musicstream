@@ -1,12 +1,15 @@
 /*
  * Облачное хранилище аудио TimurSounds.
  *
- * Приоритет: Cloudflare R2 (быстрый CDN, нулевой egress) → Supabase Storage → локально.
- * R2 подключается из админки без пересборки: нужны URL воркера (пресайн)
- * и публичный URL бакета. Загрузка идёт через пресайн-PUT, секреты в браузер не попадают.
+ * Приоритет: Cloudflare R2 → GitHub Releases → Supabase Storage → локально.
+ * Всё подключается из админки без пересборки сайта:
+ *  · R2 — URL воркера (пресайн) + публичный URL бакета, секреты живут в воркере;
+ *  · GitHub — владелец, репозиторий и fine-grained PAT (Contents: read & write),
+ *    файлы попадают в релиз, раздача — публичные ссылки через CDN GitHub.
  */
 
 import { deleteCloudAudio, getSyncMode, uploadCloudAudio } from "./sync";
+import { deleteGitHubAudio, getGhCfg, uploadGitHubAudio } from "./github";
 
 export interface R2Cfg {
   signUrl: string; // https://timursounds-r2-sign.….workers.dev
@@ -36,10 +39,11 @@ export function clearR2Cfg() {
   localStorage.removeItem(LS_R2);
 }
 
-export type AudioBackend = "r2" | "supabase" | "local";
+export type AudioBackend = "r2" | "github" | "supabase" | "local";
 
 export function audioBackend(): AudioBackend {
   if (getR2Cfg()) return "r2";
+  if (getGhCfg()) return "github";
   if (getSyncMode() === "cloud") return "supabase";
   return "local";
 }
@@ -94,15 +98,23 @@ export async function testR2(signUrlRaw: string): Promise<{ ok: boolean; error?:
  * Возвращает публичный URL или null, если облако не подключено/ошиблось.
  */
 export async function uploadRemoteAudio(trackId: string, file: File): Promise<{ url: string | null; backend: AudioBackend }> {
-  const backend = audioBackend();
-  if (backend === "r2") {
+  // R2 → GitHub Releases → Supabase Storage → локально.
+  // Локальная копия в IndexedDB сохранена всегда — трек не пропадёт в любом случае.
+  if (getR2Cfg()) {
     try {
-      return { url: await uploadR2Audio(trackId, file), backend };
+      return { url: await uploadR2Audio(trackId, file), backend: "r2" };
     } catch {
       /* пробуем запасной вариант ниже */
     }
   }
-  if (backend !== "local") {
+  if (getGhCfg()) {
+    try {
+      return { url: await uploadGitHubAudio(trackId, file), backend: "github" };
+    } catch {
+      /* пробуем запасной вариант ниже */
+    }
+  }
+  if (getSyncMode() === "cloud") {
     try {
       const url = await uploadCloudAudio(trackId, file);
       if (url) return { url, backend: "supabase" };
@@ -115,15 +127,22 @@ export async function uploadRemoteAudio(trackId: string, file: File): Promise<{ 
 
 /** Удаляет облачное аудио трека из того бэкенда, где оно лежит. */
 export async function deleteRemoteAudio(trackId: string, audioUrl?: string): Promise<void> {
-  if (audioUrl && getR2Cfg() && audioUrl.startsWith(getR2Cfg()!.publicBase)) {
+  const u = audioUrl ?? "";
+  if (u.includes("github.com") || u.includes("githubusercontent.com")) {
+    await deleteGitHubAudio(trackId, audioUrl);
+    return;
+  }
+  const r2 = getR2Cfg();
+  if (r2 && u.startsWith(r2.publicBase)) {
     await deleteR2Audio(trackId);
     return;
   }
-  if (audioUrl && audioUrl.includes("supabase")) {
+  if (u.includes("supabase")) {
     await deleteCloudAudio(trackId);
     return;
   }
-  // конфигурация могла смениться — чистим оба хранилища
+  // конфигурация могла смениться — чистим все хранилища (best effort)
   await deleteR2Audio(trackId);
+  await deleteGitHubAudio(trackId, undefined);
   await deleteCloudAudio(trackId);
 }
