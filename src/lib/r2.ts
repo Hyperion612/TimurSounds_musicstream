@@ -10,6 +10,7 @@
 
 import { deleteCloudAudio, deleteStateAudio, getSyncMode, uploadCloudAudio, uploadStateAudio } from "./sync";
 import { deleteGitHubAudio, getGhCfg, uploadGitHubAudio } from "./github";
+import { deleteMegaAudio, getMegaCfg, uploadMegaAudio } from "./mega";
 
 export interface R2Cfg {
   signUrl: string; // https://timursounds-r2-sign.….workers.dev
@@ -39,9 +40,10 @@ export function clearR2Cfg() {
   localStorage.removeItem(LS_R2);
 }
 
-export type AudioBackend = "r2" | "github" | "state" | "supabase" | "local";
+export type AudioBackend = "r2" | "github" | "mega" | "state" | "supabase" | "local";
 
 export function audioBackend(): AudioBackend {
+  if (getMegaCfg()) return "mega";
   if (getR2Cfg()) return "r2";
   if (getGhCfg()) return "github";
   if (getSyncMode() === "cloud") return "supabase";
@@ -101,9 +103,16 @@ export async function uploadRemoteAudio(
   trackId: string,
   file: File
 ): Promise<{ url: string | null; shared: boolean; backend: AudioBackend; error?: string }> {
-  // R2 → GitHub Releases → общее облако данных Supabase → Supabase Storage → локально.
+  // MEGA → R2 → GitHub Releases → общее облако данных Supabase → Supabase Storage → локально.
   // Локальная копия в IndexedDB сохранена всегда — трек не пропадёт в любом случае.
   let error: string | undefined;
+  if (getMegaCfg()) {
+    try {
+      return { url: await uploadMegaAudio(trackId, file), shared: true, backend: "mega" };
+    } catch (e) {
+      error = `MEGA: ${e instanceof Error ? e.message : "ошибка загрузки"}`;
+    }
+  }
   if (getR2Cfg()) {
     try {
       return { url: await uploadR2Audio(trackId, file), shared: true, backend: "r2" };
@@ -140,6 +149,10 @@ export async function uploadRemoteAudio(
 /** Удаляет облачное аудио трека из того бэкенда, где оно лежит. */
 export async function deleteRemoteAudio(trackId: string, audioUrl?: string): Promise<void> {
   const u = audioUrl ?? "";
+  if (u.includes("mega.nz") || u.includes("mega.io")) {
+    await deleteMegaAudio(trackId);
+    return;
+  }
   if (u.includes("github.com") || u.includes("githubusercontent.com")) {
     await deleteGitHubAudio(trackId, audioUrl);
     return;
@@ -154,7 +167,9 @@ export async function deleteRemoteAudio(trackId: string, audioUrl?: string): Pro
     return;
   }
   // конфигурация могла смениться — чистим все хранилища (best effort)
+  await deleteMegaAudio(trackId);
   await deleteR2Audio(trackId);
   await deleteGitHubAudio(trackId, undefined);
   await deleteCloudAudio(trackId);
+  await deleteStateAudio(trackId);
 }

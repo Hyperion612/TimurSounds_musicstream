@@ -7,8 +7,8 @@ import { putAudio } from "../lib/db";
 import { imageToCoverDataUrl, readAudioMeta } from "../lib/media";
 import { useStore } from "../lib/store";
 import { configureCloud, disconnectCloud, testCloud } from "../lib/sync";
-import { audioBackend, clearR2Cfg, getR2Cfg, setR2Cfg, testR2, uploadRemoteAudio } from "../lib/r2";
-import { clearGhCfg, getGhCfg, setGhCfg, testGitHub } from "../lib/github";
+import { audioBackend, uploadRemoteAudio } from "../lib/r2";
+import { clearMegaCfg, getMegaCfg, setMegaCfg, testMega } from "../lib/mega";
 import { Countdown, Cover, Reveal } from "../components/ui";
 import { PauseIcon, PlayIcon } from "../components/cards";
 
@@ -371,16 +371,22 @@ function TrackForm() {
         audioUrl,
       };
       addTrack(t);
-      if (t.kind === "file" && !audioUrl) {
+      if (t.kind === "file" && !up.shared) {
         setMsg(
           up.error
             ? `Трек «${t.title}» опубликован, но ${up.error}. Файл играет только с этого устройства.`
             : `Трек «${t.title}» опубликован, но файл не удалось выгрузить в облако — он играет только с этого устройства`
         );
-      } else if (uploadedTo === "Cloudflare R2") {
+      } else if (up.backend === "mega") {
+        setMsg(`Трек «${t.title}» опубликован — аудио в MEGA, играет у всех слушателей`);
+      } else if (up.backend === "r2") {
         setMsg(`Трек «${t.title}» опубликован — аудио в Cloudflare R2, играет быстро у всех слушателей`);
-      } else if (uploadedTo === "GitHub Releases") {
+      } else if (up.backend === "github") {
         setMsg(`Трек «${t.title}» опубликован — аудио в GitHub Releases, играет у всех слушателей`);
+      } else if (up.backend === "state") {
+        setMsg(`Трек «${t.title}» опубликован — аудио в общем облаке Supabase, играет у всех слушателей`);
+      } else if (up.backend === "supabase") {
+        setMsg(`Трек «${t.title}» опубликован — аудио в Supabase Storage, играет у всех слушателей`);
       } else {
         setMsg(`Трек «${t.title}» опубликован — у всех слушателей`);
       }
@@ -570,6 +576,76 @@ function ReleaseForm() {
           ДРУГАЯ ГЕНЕРАТИВНАЯ
         </button>
         <button type="submit" className={btnPrimary}>СОЗДАТЬ РЕЛИЗ</button>
+        {msg && <span className={msgCls}>{msg}</span>}
+      </div>
+    </form>
+  );
+}
+
+/* ================= edit release ================= */
+function EditReleaseForm({ releaseId, onClose }: { releaseId: string; onClose: () => void }) {
+  const { releases, updateRelease, artists } = useStore();
+  const release = releases.find((r) => r.id === releaseId);
+  const [title, setTitle] = useState(release?.title ?? "");
+  const [artistId, setArtistId] = useState<ArtistId>(release?.artistId ?? "timur");
+  const [kind, setKind] = useState<ReleaseKind>(release?.kind ?? "single");
+  const [year, setYear] = useState(release?.year ?? new Date().getFullYear());
+  const [cover, setCover] = useState<string | undefined>(release?.cover);
+  const [coverSeed, setCoverSeed] = useState(release?.coverSeed ?? Math.floor(Math.random() * 500) + 200);
+  const [msg, setMsg] = useState("");
+
+  if (!release) return null;
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) return;
+    updateRelease(releaseId, {
+      title: title.trim().toUpperCase(),
+      artistId,
+      kind,
+      year,
+      cover,
+      coverSeed,
+    });
+    setMsg("Релиз обновлён");
+    setTimeout(() => onClose(), 1500);
+  };
+
+  return (
+    <form onSubmit={submit} className="border border-blue/50 rounded-xl bg-coal/80 p-6 space-y-4">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="w-5 h-[3px] bg-blue" />
+        <h3 className="font-display font-bold text-sm tracking-wider uppercase">Редактировать релиз</h3>
+      </div>
+      <div className="grid md:grid-cols-4 gap-4">
+        <div className="md:col-span-2">
+          <Field label="Название">
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="NOCTURNE II" className={inputCls} required />
+          </Field>
+        </div>
+        <Field label="Артист">
+          <ArtistSelect value={artistId} onChange={setArtistId} />
+        </Field>
+        <Field label="Тип">
+          <select value={kind} onChange={(e) => setKind(e.target.value as ReleaseKind)} className={inputCls}>
+            <option value="single">Сингл</option>
+            <option value="album">Альбом</option>
+            <option value="ep">EP</option>
+          </select>
+        </Field>
+      </div>
+      <CoverPicker seed={coverSeed} title={title || "Релиз"} cover={cover} onCover={setCover} />
+      <div className="flex flex-wrap items-end gap-3">
+        <Field label="Год">
+          <input type="number" min={2000} max={2100} value={year} onChange={(e) => setYear(Number(e.target.value))} className={`${inputCls} w-28`} />
+        </Field>
+        <button type="button" onClick={() => setCoverSeed(Math.floor(Math.random() * 500) + 200)} className={btnGhost}>
+          ДРУГАЯ ГЕНЕРАТИВНАЯ
+        </button>
+        <button type="submit" className={btnPrimary}>СОХРАНИТЬ ИЗМЕНЕНИЯ</button>
+        <button type="button" onClick={onClose} className={btnGhost}>
+          ОТМЕНА
+        </button>
         {msg && <span className={msgCls}>{msg}</span>}
       </div>
     </form>
@@ -839,82 +915,31 @@ export default {
 };`;
 
 function StorageSection() {
-  /* GitHub Releases */
-  const [ghOwner, setGhOwner] = useState(() => getGhCfg()?.owner ?? "");
-  const [ghRepo, setGhRepo] = useState(() => getGhCfg()?.repo ?? "");
-  const [ghToken, setGhToken] = useState(() => getGhCfg()?.token ?? "");
-  const [ghTag, setGhTag] = useState(() => getGhCfg()?.tag ?? "audio-storage");
-  const [ghBusy, setGhBusy] = useState(false);
-  const [ghMsg, setGhMsg] = useState<{ ok: boolean; text: string } | null>(null);
-
-  /* Cloudflare R2 (альтернатива) */
-  const [signUrl, setSignUrl] = useState(() => getR2Cfg()?.signUrl ?? "");
-  const [publicBase, setPublicBase] = useState(() => getR2Cfg()?.publicBase ?? "");
-  const [r2Busy, setR2Busy] = useState(false);
-  const [r2Msg, setR2Msg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [copied, setCopied] = useState(false);
+  /* MEGA */
+  const [megaEmail, setMegaEmail] = useState(() => getMegaCfg()?.email ?? "");
+  const [megaPassword, setMegaPassword] = useState(() => getMegaCfg()?.password ?? "");
+  const [megaBusy, setMegaBusy] = useState(false);
+  const [megaMsg, setMegaMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const backend = audioBackend();
-  const ghActive = !!getGhCfg();
-  const r2Active = !!getR2Cfg();
+  const megaActive = !!getMegaCfg();
 
-  const connectGh = async () => {
-    if (ghBusy) return;
-    if (!ghOwner.trim() || !ghRepo.trim() || !ghToken.trim()) {
-      setGhMsg({ ok: false, text: "Нужны владелец, репозиторий и токен" });
+  const connectMega = async () => {
+    if (megaBusy) return;
+    if (!megaEmail.trim() || !megaPassword) {
+      setMegaMsg({ ok: false, text: "Нужны email и пароль аккаунта MEGA" });
       return;
     }
-    setGhBusy(true);
-    const res = await testGitHub(ghOwner, ghRepo, ghToken);
+    setMegaBusy(true);
+    const res = await testMega(megaEmail, megaPassword);
     if (!res.ok) {
-      setGhMsg({ ok: false, text: res.error ?? "Проверьте данные и права токена" });
-      setGhBusy(false);
+      setMegaMsg({ ok: false, text: res.error ?? "Проверьте данные" });
+      setMegaBusy(false);
       return;
     }
-    if (res.isPrivate) {
-      setGhMsg({
-        ok: false,
-        text: "Репозиторий приватный — треки загрузятся, но слушатели без токена не смогут их открыть (будет играть генеративный звук). Сделайте репозиторий публичным: Settings → General → Danger Zone → Change visibility, затем повторите.",
-      });
-      setGhBusy(false);
-      return;
-    }
-    if (res.empty) {
-      setGhMsg({ ok: false, text: "В репозитории нет ни одного коммита — GitHub не даст создать релиз. Добавьте файл (например README.md) и повторите." });
-      setGhBusy(false);
-      return;
-    }
-    setGhCfg({ owner: ghOwner.trim(), repo: ghRepo.trim(), token: ghToken.trim(), tag: ghTag.trim() || "audio-storage" });
-    setGhMsg({ ok: true, text: `GitHub Releases подключён — аудио загружается в ${ghOwner.trim()}/${ghRepo.trim()}` });
-    setGhBusy(false);
-  };
-
-  const connectR2 = async () => {
-    if (r2Busy) return;
-    if (!signUrl.trim() || !publicBase.trim()) {
-      setR2Msg({ ok: false, text: "Нужны и URL воркера, и публичный URL бакета" });
-      return;
-    }
-    setR2Busy(true);
-    const res = await testR2(signUrl);
-    if (!res.ok) {
-      setR2Msg({ ok: false, text: `Воркер не отвечает: ${res.error ?? "проверьте адрес и деплой"}` });
-      setR2Busy(false);
-      return;
-    }
-    setR2Cfg({ signUrl: signUrl.trim(), publicBase: publicBase.trim() });
-    setR2Msg({ ok: true, text: `Cloudflare R2 подключён (бакет «${res.error ?? "ts-audio"}»)` });
-    setR2Busy(false);
-  };
-
-  const copyWorker = async () => {
-    try {
-      await navigator.clipboard.writeText(WORKER_TEXT);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* clipboard недоступен */
-    }
+    setMegaCfg({ email: megaEmail.trim(), password: megaPassword });
+    setMegaMsg({ ok: true, text: "MEGA подключён — аудио загружается в зашифрованное облако" });
+    setMegaBusy(false);
   };
 
   return (
@@ -923,36 +948,35 @@ function StorageSection() {
         <span className="w-5 h-[3px] bg-blue" />
         <h3 className="font-display font-bold text-sm tracking-wider uppercase">Хранилище аудио</h3>
         <span className={`ml-auto text-[10px] font-display font-bold tracking-[0.2em] px-2.5 py-1.5 rounded border ${
-          backend === "r2" || backend === "github" ? "bg-blue/15 border-blue/50 text-sky" : "border-line text-paper/40"
+          backend === "mega" ? "bg-blue/15 border-blue/50 text-sky" : "border-line text-paper/40"
         }`}>
-          {backend === "r2" ? "R2 АКТИВЕН" : backend === "github" ? "GITHUB АКТИВЕН" : backend === "supabase" ? "SUPABASE STORAGE" : "ЛОКАЛЬНО"}
+          {backend === "mega" ? "MEGA АКТИВЕН" : backend === "r2" ? "R2 АКТИВЕН" : backend === "github" ? "GITHUB АКТИВЕН" : backend === "state" ? "ОБЛАКО SUPABASE" : backend === "supabase" ? "SUPABASE STORAGE" : "ЛОКАЛЬНО"}
         </span>
       </div>
       <p className="text-sm text-paper/55 leading-relaxed max-w-2xl">
-        Здесь выбирается, где лежат аудиофайлы треков — чтобы они быстро играли у всех слушателей, а не только у вас.
-        Приоритет: R2 → GitHub Releases → Supabase Storage → локальный IndexedDB. Скачать файл может любой,
-        загрузка идёт с подтверждением доступа.
+        Здесь выбирается, где лежат аудиофайлы треков — чтобы они играли у всех слушателей, а не только у вас.
+        Приоритет: MEGA → R2 → GitHub Releases → общее облако Supabase → локальный IndexedDB.
       </p>
 
-      {/* ---------- GitHub Releases ---------- */}
-      <div className={`relative overflow-hidden border rounded-xl p-5 ${ghActive || backend === "github" ? "border-blue/50 bg-gradient-to-br from-navy to-coal" : "border-line bg-ink/40"}`}>
+      {/* ---------- MEGA ---------- */}
+      <div className={`relative overflow-hidden border rounded-xl p-5 ${megaActive || backend === "mega" ? "border-blue/50 bg-gradient-to-br from-navy to-coal" : "border-line bg-ink/40"}`}>
         <div className="flex flex-wrap items-center gap-3 mb-3">
-          <span className="font-display font-bold text-sm tracking-wider uppercase">GitHub Releases</span>
+          <span className="font-display font-bold text-sm tracking-wider uppercase">MEGA</span>
           <span className="text-[10px] font-display font-bold tracking-[0.2em] bg-blue text-paper px-2 py-1 rounded">РЕКОМЕНДУЕМ</span>
-          {ghActive && <span className="text-[10px] tracking-[0.2em] text-sky border border-blue/40 rounded px-2 py-1">ПОДКЛЮЧЕН</span>}
+          {megaActive && <span className="text-[10px] tracking-[0.2em] text-sky border border-blue/40 rounded px-2 py-1">ПОДКЛЮЧЕН</span>}
         </div>
         <p className="text-sm text-paper/55 leading-relaxed max-w-2xl mb-4">
-          Самый простой вариант: файлы до 2 ГБ бесплатно, раздача через CDN GitHub, не нужны воркеры и серверы.
-          Треки попадают в релиз <span className="text-sky">{ghTag || "audio-storage"}</span> репозитория,
-          а слушатели качают их по публичным ссылкам — без токена.
+          Зашифрованное облако: файлы хранятся в папке <span className="text-sky">/TimurSounds/audio</span> вашего аккаунта MEGA.
+          Бесплатно до 20 ГБ, шифрование на стороне клиента — никто кроме вас не может прочитать файлы.
+          Слушатели скачивают треки по публичным ссылкам.
         </p>
 
-        {!ghActive && (
+        {!megaActive && (
           <ol className="space-y-2.5 text-sm text-paper/60 leading-relaxed list-none mb-5">
             {[
-              <>Создайте отдельный <span className="text-sky">публичный</span> репозиторий под аудио (например <span className="text-sky">timursounds-audio</span>) — загрузка идёт по токену, а слушатели скачивают треки по публичным ссылкам без всяких ключей.</>,
-              <>Создайте fine-grained токен: GitHub → Settings → Developer settings → Fine-grained tokens → Generate. Repository access — только этот репозиторий, Permissions → Repository permissions → <span className="text-sky">Contents: Read and write</span>.</>,
-              <>Вставьте владельца, репозиторий и токен ниже и нажмите «Проверить и подключить». Токен хранится только в вашем браузере.</>,
+              <>Зарегистрируйтесь на <span className="text-sky">mega.io</span> (бесплатно, 20 ГБ).</>,
+              <>Вставьте email и пароль ниже и нажмите «Проверить и подключить».</>,
+              <>Пароль хранится только в вашем браузере — используйте отдельный аккаунт MEGA для площадки.</>,
             ].map((step, i) => (
               <li key={i} className="flex gap-3">
                 <span className="shrink-0 w-6 h-6 rounded bg-blue/15 border border-blue/40 text-sky font-display font-bold text-xs flex items-center justify-center">{i + 1}</span>
@@ -963,86 +987,33 @@ function StorageSection() {
         )}
 
         <div className="grid md:grid-cols-2 gap-4">
-          <Field label="Владелец (username / организация)">
-            <input value={ghOwner} onChange={(e) => setGhOwner(e.target.value)} placeholder="Hyperion612" className={inputCls} />
+          <Field label="Email аккаунта MEGA">
+            <input value={megaEmail} onChange={(e) => setMegaEmail(e.target.value)} placeholder="your@email.com" className={inputCls} />
           </Field>
-          <Field label="Репозиторий">
-            <input value={ghRepo} onChange={(e) => setGhRepo(e.target.value)} placeholder="timursounds-audio" className={inputCls} />
-          </Field>
-          <Field label="Токен (fine-grained PAT)">
-            <input type="password" value={ghToken} onChange={(e) => setGhToken(e.target.value)} placeholder="github_pat_…" className={inputCls} />
-          </Field>
-          <Field label="Тег релиза">
-            <input value={ghTag} onChange={(e) => setGhTag(e.target.value)} placeholder="audio-storage" className={inputCls} />
+          <Field label="Пароль">
+            <input type="password" value={megaPassword} onChange={(e) => setMegaPassword(e.target.value)} placeholder="••••••••" className={inputCls} />
           </Field>
         </div>
         <div className="flex flex-wrap items-center gap-3 mt-4">
-          <button onClick={() => void connectGh()} disabled={ghBusy} className={btnPrimary}>
-            {ghBusy ? "ПРОВЕРКА…" : ghActive ? "ОБНОВИТЬ НАСТРОЙКИ" : "ПРОВЕРИТЬ И ПОДКЛЮЧИТЬ GITHUB"}
+          <button onClick={() => void connectMega()} disabled={megaBusy} className={btnPrimary}>
+            {megaBusy ? "ПРОВЕРКА…" : megaActive ? "ОБНОВИТЬ НАСТРОЙКИ" : "ПРОВЕРИТЬ И ПОДКЛЮЧИТЬ MEGA"}
           </button>
-          {ghActive && (
+          {megaActive && (
             <button
               onClick={() => {
-                if (window.confirm("Отключить GitHub Releases? Уже загруженные треки продолжат играть со своих ссылок, новые пойдут в следующее по приоритету хранилище.")) {
-                  clearGhCfg();
-                  setGhMsg({ ok: true, text: "GitHub отключён" });
+                if (window.confirm("Отключить MEGA? Уже загруженные треки продолжат играть со своих ссылок, новые пойдут в следующее по приоритету хранилище.")) {
+                  clearMegaCfg();
+                  setMegaMsg({ ok: true, text: "MEGA отключён" });
                 }
               }}
               className={btnGhost}
             >
-              ОТКЛЮЧИТЬ GITHUB
+              ОТКЛЮЧИТЬ MEGA
             </button>
           )}
-          {ghMsg && <span className={msgCls}>{ghMsg.text}</span>}
+          {megaMsg && <span className={msgCls}>{megaMsg.text}</span>}
         </div>
       </div>
-
-      {/* ---------- R2 (альтернатива) ---------- */}
-      <details className="group border border-line rounded-xl">
-        <summary className="cursor-pointer list-none px-5 py-4 flex items-center gap-3 hover:bg-white/[0.03] transition-colors rounded-xl">
-          <svg width="14" height="14" viewBox="0 0 16 16" className="text-paper/40 transition-transform group-open:rotate-90" aria-hidden>
-            <path d="M5 3l6 5-6 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <span className="font-display font-bold text-sm tracking-wider uppercase">Cloudflare R2 · альтернатива</span>
-          {r2Active && <span className="text-[10px] tracking-[0.2em] text-sky border border-blue/40 rounded px-2 py-1 ml-auto">ПОДКЛЮЧЕН</span>}
-        </summary>
-        <div className="px-5 pb-5 space-y-4">
-          <p className="text-sm text-paper/55 leading-relaxed max-w-2xl">
-            Быстрее первого байта (ближайший CDN-узел Cloudflare), но требует развернуть маленький воркер.
-            Секретные ключи R2 живут только в воркере и не попадают в браузер.
-          </p>
-          <div className="grid md:grid-cols-2 gap-4">
-            <Field label="URL воркера (пресайн)">
-              <input value={signUrl} onChange={(e) => setSignUrl(e.target.value)} placeholder="https://timursounds-r2-sign.user.workers.dev" className={inputCls} />
-            </Field>
-            <Field label="Публичный URL бакета">
-              <input value={publicBase} onChange={(e) => setPublicBase(e.target.value)} placeholder="https://pub-xxxxxxxx.r2.dev" className={inputCls} />
-            </Field>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <button onClick={() => void connectR2()} disabled={r2Busy} className={btnPrimary}>
-              {r2Busy ? "ПРОВЕРКА…" : r2Active ? "ОБНОВИТЬ НАСТРОЙКИ" : "ПРОВЕРИТЬ И ПОДКЛЮЧИТЬ R2"}
-            </button>
-            {r2Active && (
-              <button
-                onClick={() => {
-                  if (window.confirm("Отключить R2?")) {
-                    clearR2Cfg();
-                    setR2Msg({ ok: true, text: "R2 отключён" });
-                  }
-                }}
-                className={btnGhost}
-              >
-                ОТКЛЮЧИТЬ R2
-              </button>
-            )}
-            <button onClick={() => void copyWorker()} className={btnGhost}>
-              {copied ? "КОД СКОПИРОВАН" : "КОД ВОРКЕРА"}
-            </button>
-            {r2Msg && <span className={msgCls}>{r2Msg.text}</span>}
-          </div>
-        </div>
-      </details>
     </div>
   );
 }
@@ -1332,6 +1303,52 @@ function AccessTab() {
 /* ================= dashboard ================= */
 type Tab = "tracks" | "releases" | "upcoming" | "news" | "artists" | "sync" | "access";
 
+function ReleasesTab() {
+  const { releases, tracks, artists, deleteRelease } = useStore();
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  return (
+    <div className="space-y-6">
+      <ReleaseForm />
+      {editingId && <EditReleaseForm releaseId={editingId} onClose={() => setEditingId(null)} />}
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {releases.map((r) => (
+          <div key={r.id} className="flex items-center gap-3 border border-line rounded-xl bg-coal/60 p-3">
+            <Cover seed={r.coverSeed} title={r.title} cover={r.cover} className="w-14 h-14 rounded-lg border border-line shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="font-display font-bold text-sm uppercase truncate">{r.title}</div>
+              <div className="text-xs text-paper/40">
+                {artists[r.artistId].name} · {KIND_LABEL[r.kind]} · {r.year}
+              </div>
+              <div className="text-xs text-paper/30">
+                {tracks.filter((t) => t.releaseId === r.id).length}{" "}
+                {pluralRu(tracks.filter((t) => t.releaseId === r.id).length, "трек", "трека", "треков")}
+              </div>
+            </div>
+            <div className="flex flex-col gap-1.5 self-start">
+              <button
+                onClick={() => setEditingId(r.id)}
+                className="text-paper/50 hover:text-blue border border-line hover:border-blue rounded-lg px-2.5 py-1.5 text-[11px] font-display font-bold transition-all"
+              >
+                РЕДАКТИРОВАТЬ
+              </button>
+              <button
+                onClick={() => {
+                  if (window.confirm(`Удалить релиз «${r.title}»? Треки останутся вне релиза.`)) deleteRelease(r.id);
+                }}
+                className="text-paper/30 hover:text-blue border border-line hover:border-blue rounded-lg px-2.5 py-1.5 text-[11px] font-display font-bold transition-all"
+              >
+                УДАЛИТЬ
+              </button>
+            </div>
+          </div>
+        ))}
+        {!releases.length && <div className="col-span-full border border-dashed border-line rounded-xl p-10 text-center text-paper/40">Релизов пока нет — создайте первый выше.</div>}
+      </div>
+    </div>
+  );
+}
+
 function Dashboard() {
   const { tracks, releases, news, upcoming, users, deleteTrack, deleteRelease, deleteNews, logout, playsOf, artists, syncMode, resetAll } = useStore();
   const [tab, setTab] = useState<Tab>("tracks");
@@ -1408,37 +1425,7 @@ function Dashboard() {
         </div>
       )}
 
-      {tab === "releases" && (
-        <div className="space-y-6">
-          <ReleaseForm />
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {releases.map((r) => (
-              <div key={r.id} className="flex items-center gap-3 border border-line rounded-xl bg-coal/60 p-3">
-                <Cover seed={r.coverSeed} title={r.title} cover={r.cover} className="w-14 h-14 rounded-lg border border-line shrink-0" />
-                <div className="min-w-0 flex-1">
-                  <div className="font-display font-bold text-sm uppercase truncate">{r.title}</div>
-                  <div className="text-xs text-paper/40">
-                    {artists[r.artistId].name} · {KIND_LABEL[r.kind]} · {r.year}
-                  </div>
-                  <div className="text-xs text-paper/30">
-                    {tracks.filter((t) => t.releaseId === r.id).length}{" "}
-                    {pluralRu(tracks.filter((t) => t.releaseId === r.id).length, "трек", "трека", "треков")}
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    if (window.confirm(`Удалить релиз «${r.title}»? Треки останутся вне релиза.`)) deleteRelease(r.id);
-                  }}
-                  className="self-start text-paper/30 hover:text-blue border border-line hover:border-blue rounded-lg px-2.5 py-1.5 text-[11px] font-display font-bold transition-all"
-                >
-                  УДАЛИТЬ
-                </button>
-              </div>
-            ))}
-            {!releases.length && <div className="col-span-full border border-dashed border-line rounded-xl p-10 text-center text-paper/40">Релизов пока нет — создайте первый выше.</div>}
-          </div>
-        </div>
-      )}
+      {tab === "releases" && <ReleasesTab />}
 
       {tab === "upcoming" && <UpcomingTab />}
 

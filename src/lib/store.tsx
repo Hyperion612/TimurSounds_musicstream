@@ -55,6 +55,7 @@ interface StoreCtx extends State {
   addTrack: (t: Track) => void;
   deleteTrack: (id: string) => void;
   addRelease: (r: Release) => void;
+  updateRelease: (id: string, updates: Partial<Release>) => void;
   deleteRelease: (id: string) => void;
   addNews: (n: NewsItem) => void;
   deleteNews: (id: string) => void;
@@ -326,6 +327,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (t?.audioUrl) void deleteRemoteAudio(id, t.audioUrl);
       },
       addRelease: (r) => mutate((s) => ({ ...s, releases: [r, ...s.releases] })),
+      updateRelease: (id, updates) =>
+        mutate((s) => ({
+          ...s,
+          releases: s.releases.map((r) => (r.id === id ? { ...r, ...updates } : r)),
+        })),
       deleteRelease: (id) =>
         mutate((s) => ({
           ...s,
