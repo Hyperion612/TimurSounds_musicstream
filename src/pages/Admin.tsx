@@ -1089,14 +1089,33 @@ function StorageSection() {
       </div>
       <p className="text-sm text-paper/55 leading-relaxed max-w-2xl">
         Здесь выбирается, где лежат аудиофайлы треков — чтобы они играли у всех слушателей, а не только у вас.
-        Приоритет: MEGA → R2 → GitHub Releases → pCloud → общее облако Supabase → локальный IndexedDB.
+        Приоритет: общее облако Supabase → GitHub Releases → R2 → pCloud → MEGA → локальный IndexedDB.
       </p>
+
+      {/* ---------- Supabase State ---------- */}
+      <div className={`relative overflow-hidden border rounded-xl p-5 ${backend === "state" ? "border-blue/50 bg-gradient-to-br from-navy to-coal" : "border-line bg-ink/40"}`}>
+        <div className="flex flex-wrap items-center gap-3 mb-3">
+          <span className="font-display font-bold text-sm tracking-wider uppercase">Общее облако Supabase</span>
+          <span className="text-[10px] font-display font-bold tracking-[0.2em] bg-blue text-paper px-2 py-1 rounded">РЕКОМЕНДУЕМ</span>
+          {backend === "state" && <span className="text-[10px] tracking-[0.2em] text-sky border border-blue/40 rounded px-2 py-1">АКТИВНО</span>}
+        </div>
+        <p className="text-sm text-paper/55 leading-relaxed max-w-2xl mb-4">
+          Аудиофайлы хранятся прямо в базе данных Supabase. Работает автоматически, если подключено облако Supabase.
+          Треки доступны на всех устройствах без дополнительных настроек.
+        </p>
+        <div className="text-xs text-paper/40 leading-relaxed">
+          <div>✓ Не требует дополнительных сервисов</div>
+          <div>✓ Работает сразу после подключения Supabase</div>
+          <div>✓ Треки доступны на всех устройствах</div>
+          <div className="mt-2 text-paper/30">Ограничение: файлы до 12 МБ (для больших файлов используйте GitHub Releases или R2)</div>
+        </div>
+      </div>
 
       {/* ---------- MEGA ---------- */}
       <div className={`relative overflow-hidden border rounded-xl p-5 ${megaActive || backend === "mega" ? "border-blue/50 bg-gradient-to-br from-navy to-coal" : "border-line bg-ink/40"}`}>
         <div className="flex flex-wrap items-center gap-3 mb-3">
           <span className="font-display font-bold text-sm tracking-wider uppercase">MEGA</span>
-          <span className="text-[10px] font-display font-bold tracking-[0.2em] bg-blue text-paper px-2 py-1 rounded">РЕКОМЕНДУЕМ</span>
+          <span className="text-[10px] font-display font-bold tracking-[0.2em] text-paper/40 px-2 py-1 rounded border border-line">АЛЬТЕРНАТИВА</span>
           {megaActive && <span className="text-[10px] tracking-[0.2em] text-sky border border-blue/40 rounded px-2 py-1">ПОДКЛЮЧЕН</span>}
         </div>
         <p className="text-sm text-paper/55 leading-relaxed max-w-2xl mb-4">
