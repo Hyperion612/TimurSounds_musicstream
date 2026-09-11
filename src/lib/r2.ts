@@ -44,10 +44,10 @@ export function clearR2Cfg() {
 export type AudioBackend = "pcloud" | "r2" | "github" | "mega" | "state" | "supabase" | "local";
 
 export function audioBackend(): AudioBackend {
-  if (getPCloudCfg()) return "pcloud";
   if (getMegaCfg()) return "mega";
   if (getR2Cfg()) return "r2";
   if (getGhCfg()) return "github";
+  if (getPCloudCfg()) return "pcloud";
   if (getSyncMode() === "cloud") return "supabase";
   return "local";
 }
@@ -105,21 +105,21 @@ export async function uploadRemoteAudio(
   trackId: string,
   file: File
 ): Promise<{ url: string | null; shared: boolean; backend: AudioBackend; error?: string }> {
-  // pCloud → MEGA → R2 → GitHub Releases → общее облако данных Supabase → Supabase Storage → локально.
+  // MEGA → R2 → GitHub Releases → pCloud → общее облако данных Supabase → Supabase Storage → локально.
   // Локальная копия в IndexedDB сохранена всегда — трек не пропадёт в любом случае.
   let error: string | undefined;
-  if (getPCloudCfg()) {
-    try {
-      return { url: await uploadPCloudAudio(trackId, file), shared: true, backend: "pcloud" };
-    } catch (e) {
-      error = `pCloud: ${e instanceof Error ? e.message : "ошибка загрузки"}`;
-    }
-  }
   if (getMegaCfg()) {
     try {
       return { url: await uploadMegaAudio(trackId, file), shared: true, backend: "mega" };
     } catch (e) {
       error = `MEGA: ${e instanceof Error ? e.message : "ошибка загрузки"}`;
+    }
+  }
+  if (getPCloudCfg()) {
+    try {
+      return { url: await uploadPCloudAudio(trackId, file), shared: true, backend: "pcloud" };
+    } catch (e) {
+      error = `pCloud: ${e instanceof Error ? e.message : "ошибка загрузки"}`;
     }
   }
   if (getR2Cfg()) {
