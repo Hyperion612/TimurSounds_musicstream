@@ -41,31 +41,46 @@ export function clearMegaCfg() {
 
 let storageCache: Storage | null = null;
 let storageCacheKey = "";
+let audioFolderCache: any = null;
 
 async function getStorage(): Promise<Storage> {
   const cfg = getMegaCfg();
   if (!cfg) throw new Error("MEGA не настроен");
   const key = `${cfg.email}:${cfg.password}`;
   if (storageCache && storageCacheKey === key) return storageCache;
+  console.log("[MEGA] Подключение к аккаунту...");
   const storage = new Storage({ email: cfg.email, password: cfg.password });
   await storage.ready;
+  console.log("[MEGA] Подключено успешно");
   storageCache = storage;
   storageCacheKey = key;
+  audioFolderCache = null; // сбрасываем кэш папки при переподключении
   return storage;
 }
 
 async function ensureFolder(storage: Storage): Promise<any> {
+  if (audioFolderCache) return audioFolderCache;
+  
+  console.log("[MEGA] Поиск папки /TimurSounds/audio...");
   const root = storage.root;
   const rootChildren = root.children || [];
   let folder = rootChildren.find((c: any) => c.name === MEGA_FOLDER && c.directory);
+  
   if (!folder) {
+    console.log("[MEGA] Создание папки /TimurSounds...");
     folder = await root.mkdir(MEGA_FOLDER);
   }
+  
   const folderChildren = folder.children || [];
   let audioFolder = folderChildren.find((c: any) => c.name === "audio" && c.directory);
+  
   if (!audioFolder) {
+    console.log("[MEGA] Создание папки /TimurSounds/audio...");
     audioFolder = await folder.mkdir("audio");
   }
+  
+  audioFolderCache = audioFolder;
+  console.log("[MEGA] Папка готова");
   return audioFolder;
 }
 
@@ -80,6 +95,8 @@ function fileToArrayBuffer(file: File): Promise<ArrayBuffer> {
 
 /** Загружает аудио в MEGA и возвращает публичную ссылку. */
 export async function uploadMegaAudio(trackId: string, file: File): Promise<string> {
+  console.log(`[MEGA] Начало загрузки трека ${trackId} (${(file.size / 1024 / 1024).toFixed(2)} МБ)`);
+  
   const storage = await getStorage();
   const audioFolder = await ensureFolder(storage);
   
@@ -87,28 +104,53 @@ export async function uploadMegaAudio(trackId: string, file: File): Promise<stri
   const folderChildren = audioFolder.children || [];
   const oldFile = folderChildren.find((c: any) => c.name === trackId);
   if (oldFile) {
+    console.log("[MEGA] Удаление старого файла...");
     await oldFile.delete();
   }
   
+  console.log("[MEGA] Чтение файла...");
   const buffer = await fileToArrayBuffer(file);
-  const uploaded = await audioFolder.upload({ name: trackId, size: buffer.byteLength }, new Uint8Array(buffer));
+  
+  console.log("[MEGA] Загрузка файла...");
+  const uploaded = await audioFolder.upload(
+    { name: trackId, size: buffer.byteLength },
+    new Uint8Array(buffer)
+  );
+  
+  console.log("[MEGA] Ожидание завершения загрузки...");
   await uploaded.complete;
   
   // Получаем публичную ссылку
-  const link = uploaded.link();
+  console.log("[MEGA] Получение публичной ссылки...");
+  
+  // Метод link() возвращает Promise, который резолвится в публичную ссылку
+  // Формат: https://mega.nz/file/downloadId#key
+  const link = await uploaded.link();
+  
+  if (!link) {
+    throw new Error("Не удалось получить публичную ссылку на файл");
+  }
+  
+  console.log(`[MEGA] Загрузка завершена: ${link}`);
   return link;
 }
 
 /** Удаляет аудио из MEGA (best effort). */
 export async function deleteMegaAudio(trackId: string): Promise<void> {
   try {
+    console.log(`[MEGA] Удаление трека ${trackId}...`);
     const storage = await getStorage();
     const audioFolder = await ensureFolder(storage);
-    const file = audioFolder.children.find((c: any) => c.name === trackId);
+    const folderChildren = audioFolder.children || [];
+    const file = folderChildren.find((c: any) => c.name === trackId);
     if (file) {
       await file.delete();
+      console.log("[MEGA] Файл удалён");
+    } else {
+      console.log("[MEGA] Файл не найден");
     }
-  } catch {
+  } catch (e) {
+    console.warn("[MEGA] Ошибка удаления:", e);
     /* файл мог не загружаться */
   }
 }
@@ -119,13 +161,28 @@ export async function testMega(email: string, password: string): Promise<{ ok: b
     const e = email.trim();
     const p = password;
     if (!e || !p) return { ok: false, error: "Нужны email и пароль" };
+    
+    console.log("[MEGA] Проверка подключения...");
     const storage = new Storage({ email: e, password: p });
     await storage.ready;
+    
+    // Проверяем, что можем читать корневую папку
+    const root = storage.root;
+    if (!root) {
+      return { ok: false, error: "Не удалось получить доступ к файлам" };
+    }
+    
+    console.log("[MEGA] Подключение успешно");
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Не удалось подключиться к MEGA";
+    console.error("[MEGA] Ошибка подключения:", msg);
+    
     if (msg.includes("Login failed") || msg.includes("incorrect")) {
       return { ok: false, error: "Неверный email или пароль" };
+    }
+    if (msg.includes("ENOTFOUND") || msg.includes("network")) {
+      return { ok: false, error: "Нет соединения с серверами MEGA" };
     }
     return { ok: false, error: msg };
   }
