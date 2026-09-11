@@ -381,7 +381,8 @@ export async function uploadCloudAudio(trackId: string, file: File): Promise<str
   try {
     const sb = await storageClient();
     if (!sb) return null;
-    const path = `${trackId}/${encodeURIComponent(file.name)}`;
+    // Используем trackId как имя файла без кодирования (Supabase сам кодирует при необходимости)
+    const path = `${trackId}/${file.name}`;
     const { error } = await sb.storage.from(AUDIO_BUCKET).upload(path, file, {
       contentType: file.type || "audio/mpeg",
       upsert: true,
