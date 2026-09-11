@@ -1109,16 +1109,46 @@ function StorageSection() {
           <div>✓ Файлы до 2 ГБ</div>
           <div>✓ Треки доступны на всех устройствах</div>
         </div>
-        <div className="text-xs text-paper/50 leading-relaxed border-l-2 border-blue pl-3">
-          <div className="font-semibold mb-1">Как создать правильный токен:</div>
-          <ol className="list-decimal list-inside space-y-1 text-paper/40">
-            <li>Перейдите на <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener noreferrer" className="text-sky hover:underline">github.com/settings/tokens?type=beta</a></li>
-            <li>Нажмите "Generate new token"</li>
-            <li>Выберите "Fine-grained token" (не classic!)</li>
-            <li>Repository access: выберите "Only select repositories" → выберите ваш репозиторий</li>
-            <li>Permissions → Repository permissions → Contents: <span className="text-sky font-semibold">Read and write</span></li>
-            <li>Скопируйте токен и вставьте ниже</li>
+        <div className="bg-ink/40 border border-line rounded-lg p-4 text-xs text-paper/50 space-y-3">
+          <div className="font-semibold text-paper/70 text-sm mb-2">Как создать правильный токен:</div>
+          <ol className="list-decimal list-inside space-y-2">
+            <li>
+              Перейдите на{" "}
+              <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener noreferrer" className="text-sky hover:underline">
+                github.com/settings/tokens?type=beta
+              </a>
+            </li>
+            <li>Нажмите <span className="text-paper/70 font-semibold">"Generate new token"</span></li>
+            <li>
+              Выберите <span className="text-paper/70 font-semibold">"Fine-grained token"</span> (НЕ classic!)
+            </li>
+            <li>
+              Заполните поля:
+              <ul className="list-disc list-inside ml-4 mt-1 space-y-1">
+                <li>Token name: любое имя (например, "TimurSounds")</li>
+                <li>Expiration: выберите срок действия</li>
+                <li>Description: описание (необязательно)</li>
+              </ul>
+            </li>
+            <li>
+              <span className="text-paper/70 font-semibold">Repository access</span>: выберите{" "}
+              <span className="text-sky">"Only select repositories"</span> → выберите ваш репозиторий{" "}
+              <span className="text-paper/70">timursounds-audio</span>
+            </li>
+            <li>
+              <span className="text-paper/70 font-semibold">Permissions</span> →{" "}
+              <span className="text-paper/70 font-semibold">Repository permissions</span> → найдите{" "}
+              <span className="text-paper/70 font-semibold">Contents</span> и выберите{" "}
+              <span className="text-sky font-semibold">"Read and write"</span>
+            </li>
+            <li>
+              Нажмите <span className="text-paper/70 font-semibold">"Generate token"</span> внизу страницы
+            </li>
+            <li>Скопируйте токен (начинается с <span className="text-paper/70">github_pat_...</span>) и вставьте ниже</li>
           </ol>
+          <div className="mt-3 p-2 bg-blue/10 border border-blue/30 rounded text-sky text-xs">
+            <span className="font-semibold">Важно:</span> Если вы уже создавали токен, удалите его и создайте новый с правильными правами. Классические токены (classic) не работают!
+          </div>
         </div>
       </div>
 

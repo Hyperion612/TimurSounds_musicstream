@@ -163,6 +163,8 @@ export async function testGitHub(
     const o = owner.trim();
     const r = repo.trim();
     if (!o || !r || o.includes("/") || r.includes("/")) return { ok: false, error: "Проверьте владельца и репозиторий" };
+    
+    // Проверяем доступ к репозиторию
     const res = await fetch(`https://api.github.com/repos/${o}/${r}`, { headers: headers(token.trim()) });
     if (res.status === 401) return { ok: false, error: "Токен недействителен (401). Проверьте, что скопировали полный токен." };
     if (res.status === 403) {
@@ -173,8 +175,18 @@ export async function testGitHub(
     }
     if (res.status === 404) return { ok: false, error: "Репозиторий не найден или токен без доступа к нему (404). Проверьте, что репозиторий публичный." };
     if (!res.ok) return { ok: false, error: `GitHub API: ${res.status}` };
-    const j = (await res.json()) as { private?: boolean; size?: number };
-    return { ok: true, isPrivate: !!j.private, empty: (j.size ?? 1) === 0 };
+    
+    const repoData = (await res.json()) as { private?: boolean; size?: number; permissions?: { admin?: boolean; push?: boolean; pull?: boolean } };
+    
+    // Проверяем права на запись
+    if (repoData.permissions && !repoData.permissions.push) {
+      return { 
+        ok: false, 
+        error: "Токен не имеет прав на запись в репозиторий. Убедитесь, что создали Fine-grained token с правами Contents: Read and write." 
+      };
+    }
+    
+    return { ok: true, isPrivate: !!repoData.private, empty: (repoData.size ?? 1) === 0 };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Не удалось связаться с GitHub" };
   }
