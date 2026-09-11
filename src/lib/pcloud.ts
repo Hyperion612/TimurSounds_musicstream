@@ -1,282 +1,219 @@
-/**
- * pCloud API клиент для хранения аудиофайлов
- * Документация: https://docs.pcloud.com/
+/*
+ * Хранилище аудио в pCloud.
+ *
+ * pCloud поддерживает OAuth 2.0 аутентификацию и имеет CDN для быстрой раздачи.
+ * Бесплатный тариф: 10 ГБ.
+ * Файлы загружаются в папку /TimurSounds/audio/
  */
 
-const PCLOUD_API_BASE = 'https://api.pcloud.com';
-const PCLOUD_FOLDER = 'TimurSounds/audio';
-
-interface PCloudConfig {
+export interface PCloudCfg {
   accessToken: string;
+  hostname: string; // api.pcloud.com или eapi.pcloud.com
+  uid: string;
 }
 
-interface PCloudFile {
-  id: number;
-  name: string;
-  size: number;
-  contenttype: string;
-  created: string;
-  modified: string;
-}
+const LS_PCLOUD = "timursounds_pcloud_cfg";
+const PCLOUD_FOLDER = "/TimurSounds/audio";
 
-interface PCloudFolder {
-  id: number;
-  name: string;
-  contents: Array<PCloudFile | PCloudFolder>;
-}
-
-let pcloudConfig: PCloudConfig | null = null;
-
-export function initPCloud(accessToken: string): void {
-  pcloudConfig = { accessToken };
-  localStorage.setItem('pcloud_access_token', accessToken);
-}
-
-export function getPCloudConfig(): PCloudConfig | null {
-  if (pcloudConfig) return pcloudConfig;
-  const token = localStorage.getItem('pcloud_access_token');
-  if (token) {
-    pcloudConfig = { accessToken: token };
-    return pcloudConfig;
+export function getPCloudCfg(): PCloudCfg | null {
+  try {
+    const raw = localStorage.getItem(LS_PCLOUD);
+    if (raw) {
+      const c = JSON.parse(raw) as PCloudCfg;
+      if (c && c.accessToken && c.hostname && c.uid) {
+        return c;
+      }
+    }
+  } catch {
+    /* ignore */
   }
   return null;
 }
 
-export function clearPCloudConfig(): void {
-  pcloudConfig = null;
-  localStorage.removeItem('pcloud_access_token');
+export function setPCloudCfg(cfg: PCloudCfg) {
+  localStorage.setItem(LS_PCLOUD, JSON.stringify(cfg));
 }
 
-async function apiCall<T>(method: string, params: Record<string, any> = {}): Promise<T> {
-  const config = getPCloudConfig();
-  if (!config) throw new Error('pCloud не настроен');
-
-  const url = new URL(`${PCLOUD_API_BASE}/${method}`);
-  url.searchParams.set('access_token', config.accessToken);
-  
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null) {
-      url.searchParams.set(key, String(value));
-    }
-  });
-
-  const response = await fetch(url.toString(), {
-    method: 'GET',
-  });
-
-  if (!response.ok) {
-    throw new Error(`pCloud API error: ${response.status} ${response.statusText}`);
-  }
-
-  const data = await response.json();
-  
-  if (data.error) {
-    throw new Error(`pCloud error: ${data.error} (${data.result?.message || 'Unknown error'})`);
-  }
-
-  return data as T;
+export function clearPCloudCfg() {
+  localStorage.removeItem(LS_PCLOUD);
 }
 
-async function apiUpload<T>(method: string, formData: FormData): Promise<T> {
-  const config = getPCloudConfig();
-  if (!config) throw new Error('pCloud не настроен');
+let folderIdCache: number | null = null;
 
-  const url = new URL(`${PCLOUD_API_BASE}/${method}`);
-  url.searchParams.set('access_token', config.accessToken);
+/**
+ * Создаёт папку /TimurSounds/audio если её нет, возвращает folderid.
+ */
+async function ensureFolder(cfg: PCloudCfg): Promise<number> {
+  if (folderIdCache !== null) return folderIdCache;
 
-  const response = await fetch(url.toString(), {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!response.ok) {
-    throw new Error(`pCloud API error: ${response.status} ${response.statusText}`);
-  }
-
-  const data = await response.json();
+  console.log("[pCloud] Создание папки /TimurSounds/audio...");
   
-  if (data.error) {
-    throw new Error(`pCloud error: ${data.error} (${data.result?.message || 'Unknown error'})`);
+  // Создаём /TimurSounds
+  const res1 = await fetch(
+    `https://${cfg.hostname}/createfolderifnotexists?access_token=${cfg.accessToken}&path=/TimurSounds`
+  );
+  const json1 = await res1.json();
+  if (json1.result !== 0) {
+    throw new Error(`Не удалось создать папку /TimurSounds: ${json1.result}`);
   }
 
-  return data as T;
+  // Создаём /TimurSounds/audio
+  const res2 = await fetch(
+    `https://${cfg.hostname}/createfolderifnotexists?access_token=${cfg.accessToken}&path=/TimurSounds/audio`
+  );
+  const json2 = await res2.json();
+  if (json2.result !== 0) {
+    throw new Error(`Не удалось создать папку /TimurSounds/audio: ${json2.result}`);
+  }
+
+  const id = json2.metadata.folderid;
+  folderIdCache = id;
+  console.log(`[pCloud] Папка готова (folderid: ${id})`);
+  return id;
 }
 
 /**
- * Получение или создание папки для аудио
+ * Загружает аудио в pCloud и возвращает fileid.
  */
-async function ensureAudioFolder(): Promise<number> {
-  console.log('[pCloud] Проверка папки', PCLOUD_FOLDER);
+export async function uploadPCloudAudio(trackId: string, file: File): Promise<string> {
+  console.log(`[pCloud] Начало загрузки трека ${trackId} (${(file.size / 1024 / 1024).toFixed(2)} МБ)`);
   
-  // Получаем корневую папку
-  const root = await apiCall<PCloudFolder>('listfolder', { folderid: 0 });
-  
-  // Ищем или создаём папку TimurSounds
-  let timurSoundsFolder = root.contents.find(
-    (item): item is PCloudFolder => 'contents' in item && item.name === 'TimurSounds'
-  );
-  
-  if (!timurSoundsFolder) {
-    console.log('[pCloud] Создание папки /TimurSounds');
-    const result = await apiCall<{ metadata: PCloudFolder }>('createfolder', {
-      name: 'TimurSounds',
-      folderid: 0,
-    });
-    timurSoundsFolder = result.metadata;
-  }
-  
-  // Ищем или создаём папку audio
-  let audioFolder = timurSoundsFolder.contents.find(
-    (item): item is PCloudFolder => 'contents' in item && item.name === 'audio'
-  );
-  
-  if (!audioFolder) {
-    console.log('[pCloud] Создание папки /TimurSounds/audio');
-    const result = await apiCall<{ metadata: PCloudFolder }>('createfolder', {
-      name: 'audio',
-      folderid: timurSoundsFolder.id,
-    });
-    audioFolder = result.metadata;
-  }
-  
-  console.log('[pCloud] Папка готова:', audioFolder.id);
-  return audioFolder.id;
-}
+  const cfg = getPCloudCfg();
+  if (!cfg) throw new Error("pCloud не настроен");
 
-/**
- * Загрузка аудиофайла в pCloud
- */
-export async function uploadToPCloud(trackId: string, file: File): Promise<string> {
-  console.log('[pCloud] Начало загрузки:', file.name, `(${(file.size / 1024 / 1024).toFixed(2)} МБ)`);
-  
-  const folderId = await ensureAudioFolder();
-  
-  // Удаляем старый файл с тем же именем, если есть
-  try {
-    const folder = await apiCall<PCloudFolder>('listfolder', { folderid: folderId });
-    const existingFile = folder.contents.find(
-      (item): item is PCloudFile => !('contents' in item) && item.name === trackId
-    );
-    
-    if (existingFile) {
-      console.log('[pCloud] Удаление старого файла:', existingFile.id);
-      await apiCall('deletefile', { fileid: existingFile.id });
-    }
-  } catch (e) {
-    console.warn('[pCloud] Ошибка при проверке существующего файла:', e);
-  }
-  
-  // Загружаем новый файл
-  console.log('[pCloud] Загрузка файла...');
+  const folderId = await ensureFolder(cfg);
+
+  console.log("[pCloud] Загрузка файла...");
   const formData = new FormData();
-  formData.append('file', file, trackId);
-  formData.append('folderid', String(folderId));
-  
-  const result = await apiUpload<{ metadata: PCloudFile[] }>('uploadfile', formData);
-  
-  if (!result.metadata || result.metadata.length === 0) {
-    throw new Error('pCloud: файл не был загружен');
+  formData.append("file", file, trackId);
+
+  const res = await fetch(
+    `https://${cfg.hostname}/uploadfile?access_token=${cfg.accessToken}&folderid=${folderId}&filename=${encodeURIComponent(trackId)}&nopartial=1`,
+    {
+      method: "POST",
+      body: formData,
+    }
+  );
+
+  const json = await res.json();
+  if (json.result !== 0) {
+    throw new Error(`Ошибка загрузки: ${json.result}`);
   }
-  
-  const uploadedFile = result.metadata[0];
-  console.log('[pCloud] Файл загружен:', uploadedFile.id);
-  
+
+  const fileId = json.fileids[0];
+  console.log(`[pCloud] Файл загружен (fileid: ${fileId})`);
+
   // Получаем публичную ссылку
-  console.log('[pCloud] Получение публичной ссылки...');
-  const linkResult = await apiCall<{ hosts: string[]; path: string }>('getfilelink', {
-    fileid: uploadedFile.id,
-  });
+  console.log("[pCloud] Получение публичной ссылки...");
+  const linkRes = await fetch(
+    `https://${cfg.hostname}/getfilepublink?access_token=${cfg.accessToken}&fileid=${fileId}`
+  );
+  const linkJson = await linkRes.json();
   
-  if (!linkResult.hosts || linkResult.hosts.length === 0) {
-    throw new Error('pCloud: не удалось получить ссылку на файл');
+  if (linkJson.result !== 0) {
+    throw new Error(`Не удалось получить публичную ссылку: ${linkJson.result}`);
   }
+
+  // Формируем прямую ссылку на скачивание
+  const downloadUrl = `https://${cfg.hostname}/getlink?access_token=${cfg.accessToken}&fileid=${fileId}`;
   
-  const publicUrl = `https://${linkResult.hosts[0]}${linkResult.path}`;
-  console.log('[pCloud] Публичная ссылка:', publicUrl);
-  
-  return publicUrl;
+  console.log(`[pCloud] Загрузка завершена: ${downloadUrl}`);
+  return downloadUrl;
 }
 
 /**
- * Удаление аудиофайла из pCloud
+ * Удаляет аудио из pCloud (best effort).
  */
-export async function deleteFromPCloud(trackId: string): Promise<void> {
-  console.log('[pCloud] Удаление файла:', trackId);
-  
+export async function deletePCloudAudio(trackId: string): Promise<void> {
   try {
-    const folderId = await ensureAudioFolder();
-    const folder = await apiCall<PCloudFolder>('listfolder', { folderid: folderId });
-    
-    const file = folder.contents.find(
-      (item): item is PCloudFile => !('contents' in item) && item.name === trackId
+    console.log(`[pCloud] Удаление трека ${trackId}...`);
+    const cfg = getPCloudCfg();
+    if (!cfg) return;
+
+    const folderId = await ensureFolder(cfg);
+
+    // Ищем файл по имени
+    const listRes = await fetch(
+      `https://${cfg.hostname}/listfolder?access_token=${cfg.accessToken}&folderid=${folderId}`
     );
+    const listJson = await listRes.json();
     
-    if (file) {
-      await apiCall('deletefile', { fileid: file.id });
-      console.log('[pCloud] Файл удалён:', file.id);
+    if (listJson.result !== 0) {
+      console.warn("[pCloud] Не удалось получить список файлов");
+      return;
+    }
+
+    const file = listJson.metadata.contents?.find((f: any) => f.name === trackId);
+    if (!file) {
+      console.log("[pCloud] Файл не найден");
+      return;
+    }
+
+    // Удаляем файл
+    const delRes = await fetch(
+      `https://${cfg.hostname}/deletefile?access_token=${cfg.accessToken}&fileid=${file.fileid}`
+    );
+    const delJson = await delRes.json();
+    
+    if (delJson.result !== 0) {
+      console.warn(`[pCloud] Ошибка удаления: ${delJson.result}`);
     } else {
-      console.log('[pCloud] Файл не найден:', trackId);
+      console.log("[pCloud] Файл удалён");
     }
   } catch (e) {
-    console.warn('[pCloud] Ошибка при удалении файла:', e);
+    console.warn("[pCloud] Ошибка удаления:", e);
   }
 }
 
 /**
- * Проверка подключения к pCloud
+ * Проверка доступа до сохранения конфигурации.
  */
-export async function testPCloudConnection(accessToken: string): Promise<{ ok: boolean; error?: string }> {
+export async function testPCloud(accessToken: string, hostname: string): Promise<{ ok: boolean; error?: string; uid?: string }> {
   try {
-    console.log('[pCloud] Проверка подключения...');
+    console.log("[pCloud] Проверка подключения...");
     
-    const url = new URL(`${PCLOUD_API_BASE}/userinfo`);
-    url.searchParams.set('access_token', accessToken);
+    const res = await fetch(
+      `https://${hostname}/userinfo?access_token=${accessToken}`
+    );
+    const json = await res.json();
     
-    const response = await fetch(url.toString());
-    
-    if (!response.ok) {
-      return { ok: false, error: `HTTP ${response.status}: ${response.statusText}` };
+    if (json.result !== 0) {
+      return { ok: false, error: `Неверный токен или хост (${json.result})` };
     }
-    
-    const data = await response.json();
-    
-    if (data.error) {
-      return { ok: false, error: data.result?.message || 'Неверный токен доступа' };
-    }
-    
-    console.log('[pCloud] Подключение успешно, пользователь:', data.email);
-    return { ok: true };
+
+    console.log("[pCloud] Подключение успешно");
+    return { ok: true, uid: String(json.userid) };
   } catch (e) {
-    console.error('[pCloud] Ошибка подключения:', e);
-    return { ok: false, error: e instanceof Error ? e.message : 'Неизвестная ошибка' };
+    const msg = e instanceof Error ? e.message : "Не удалось подключиться к pCloud";
+    console.error("[pCloud] Ошибка подключения:", msg);
+    return { ok: false, error: msg };
   }
 }
 
 /**
- * Получение OAuth URL для авторизации
+ * Начинает OAuth 2.0 авторизацию в pCloud.
  */
-export function getPCloudOAuthUrl(clientId: string, redirectUri: string): string {
-  const url = new URL('https://my.pcloud.com/oauth2/authorize');
-  url.searchParams.set('client_id', clientId);
-  url.searchParams.set('redirect_uri', redirectUri);
-  url.searchParams.set('response_type', 'token');
-  return url.toString();
+export function startPCloudAuth(clientId: string, redirectUri: string): void {
+  const authUrl = `https://my.pcloud.com/oauth2/authorize?client_id=${clientId}&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}`;
+  window.open(authUrl, "_blank", "width=600,height=700");
 }
 
 /**
- * Извлечение access_token из URL после OAuth редиректа
+ * Извлекает access_token из URL после OAuth 2.0 авторизации.
  */
-export function extractAccessTokenFromUrl(): string | null {
+export function extractPCloudTokenFromUrl(): PCloudCfg | null {
   const hash = window.location.hash;
-  if (!hash) return null;
-  
-  const params = new URLSearchParams(hash.substring(1));
-  const token = params.get('access_token');
-  
-  // Очищаем URL от хэша
-  if (token) {
-    window.history.replaceState(null, '', window.location.pathname);
-  }
-  
-  return token;
+  if (!hash || !hash.includes("access_token=")) return null;
+
+  const params = new URLSearchParams(hash.slice(1));
+  const accessToken = params.get("access_token");
+  const hostname = params.get("hostname") || "api.pcloud.com";
+  const uid = params.get("uid");
+
+  if (!accessToken || !uid) return null;
+
+  // Очищаем hash из URL
+  window.history.replaceState(null, "", window.location.pathname + window.location.search);
+
+  return { accessToken, hostname, uid };
 }

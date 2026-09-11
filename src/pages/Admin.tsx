@@ -9,7 +9,7 @@ import { useStore } from "../lib/store";
 import { configureCloud, disconnectCloud, testCloud } from "../lib/sync";
 import { audioBackend, uploadRemoteAudio } from "../lib/r2";
 import { clearMegaCfg, getMegaCfg, setMegaCfg, testMega } from "../lib/mega";
-import { clearPCloudConfig, getPCloudConfig, initPCloud, testPCloudConnection } from "../lib/pcloud";
+import { clearPCloudCfg, getPCloudCfg, setPCloudCfg, testPCloud, startPCloudAuth, extractPCloudTokenFromUrl } from "../lib/pcloud";
 import { Countdown, Cover, Reveal } from "../components/ui";
 import { PauseIcon, PlayIcon } from "../components/cards";
 
@@ -919,7 +919,7 @@ export default {
 
 function StorageSection() {
   /* pCloud */
-  const [pcloudToken, setPcloudToken] = useState(() => getPCloudConfig()?.accessToken ?? "");
+  const [pcloudClientId, setPcloudClientId] = useState("");
   const [pcloudBusy, setPcloudBusy] = useState(false);
   const [pcloudMsg, setPcloudMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -930,24 +930,31 @@ function StorageSection() {
   const [megaMsg, setMegaMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const backend = audioBackend();
-  const pcloudActive = !!getPCloudConfig();
+  const pcloudActive = !!getPCloudCfg();
   const megaActive = !!getMegaCfg();
+
+  // Проверяем, есть ли токен в URL после OAuth flow
+  useState(() => {
+    const cfg = extractPCloudTokenFromUrl();
+    if (cfg) {
+      setPCloudCfg(cfg);
+      setPcloudMsg({ ok: true, text: "pCloud подключён через OAuth" });
+    }
+  });
 
   const connectPCloud = async () => {
     if (pcloudBusy) return;
-    if (!pcloudToken.trim()) {
-      setPcloudMsg({ ok: false, text: "Нужен access token pCloud" });
+    if (!pcloudClientId.trim()) {
+      setPcloudMsg({ ok: false, text: "Нужен Client ID приложения pCloud" });
       return;
     }
     setPcloudBusy(true);
-    const res = await testPCloudConnection(pcloudToken.trim());
-    if (!res.ok) {
-      setPcloudMsg({ ok: false, text: res.error ?? "Проверьте токен" });
-      setPcloudBusy(false);
-      return;
-    }
-    initPCloud(pcloudToken.trim());
-    setPcloudMsg({ ok: true, text: "pCloud подключён — аудио загружается в облако" });
+    
+    // Запускаем OAuth flow
+    const redirectUri = window.location.origin + window.location.pathname;
+    startPCloudAuth(pcloudClientId.trim(), redirectUri);
+    
+    setPcloudMsg({ ok: true, text: "Откроется окно авторизации pCloud..." });
     setPcloudBusy(false);
   };
 
@@ -1014,19 +1021,19 @@ function StorageSection() {
         )}
 
         <div className="grid md:grid-cols-1 gap-4">
-          <Field label="Access token pCloud">
-            <input type="password" value={pcloudToken} onChange={(e) => setPcloudToken(e.target.value)} placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" className={inputCls} />
+          <Field label="Client ID приложения pCloud">
+            <input value={pcloudClientId} onChange={(e) => setPcloudClientId(e.target.value)} placeholder="xxxxxxxxxxxxxxxx" className={inputCls} />
           </Field>
         </div>
         <div className="flex flex-wrap items-center gap-3 mt-4">
           <button onClick={() => void connectPCloud()} disabled={pcloudBusy} className={btnPrimary}>
-            {pcloudBusy ? "ПРОВЕРКА…" : pcloudActive ? "ОБНОВИТЬ НАСТРОЙКИ" : "ПРОВЕРИТЬ И ПОДКЛЮЧИТЬ PCLOUD"}
+            {pcloudBusy ? "ПРОВЕРКА…" : pcloudActive ? "ОБНОВИТЬ НАСТРОЙКИ" : "ПОДКЛЮЧИТЬ PCLOUD"}
           </button>
           {pcloudActive && (
             <button
               onClick={() => {
                 if (window.confirm("Отключить pCloud? Уже загруженные треки продолжат играть со своих ссылок, новые пойдут в следующее по приоритету хранилище.")) {
-                  clearPCloudConfig();
+                  clearPCloudCfg();
                   setPcloudMsg({ ok: true, text: "pCloud отключён" });
                 }
               }}

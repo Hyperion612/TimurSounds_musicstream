@@ -11,7 +11,7 @@
 import { deleteCloudAudio, deleteStateAudio, getSyncMode, uploadCloudAudio, uploadStateAudio } from "./sync";
 import { deleteGitHubAudio, getGhCfg, uploadGitHubAudio } from "./github";
 import { deleteMegaAudio, getMegaCfg, uploadMegaAudio } from "./mega";
-import { deleteFromPCloud, getPCloudConfig, uploadToPCloud } from "./pcloud";
+import { deletePCloudAudio, getPCloudCfg, uploadPCloudAudio } from "./pcloud";
 
 export interface R2Cfg {
   signUrl: string; // https://timursounds-r2-sign.….workers.dev
@@ -44,7 +44,7 @@ export function clearR2Cfg() {
 export type AudioBackend = "pcloud" | "r2" | "github" | "mega" | "state" | "supabase" | "local";
 
 export function audioBackend(): AudioBackend {
-  if (getPCloudConfig()) return "pcloud";
+  if (getPCloudCfg()) return "pcloud";
   if (getMegaCfg()) return "mega";
   if (getR2Cfg()) return "r2";
   if (getGhCfg()) return "github";
@@ -108,9 +108,9 @@ export async function uploadRemoteAudio(
   // pCloud → MEGA → R2 → GitHub Releases → общее облако данных Supabase → Supabase Storage → локально.
   // Локальная копия в IndexedDB сохранена всегда — трек не пропадёт в любом случае.
   let error: string | undefined;
-  if (getPCloudConfig()) {
+  if (getPCloudCfg()) {
     try {
-      return { url: await uploadToPCloud(trackId, file), shared: true, backend: "pcloud" };
+      return { url: await uploadPCloudAudio(trackId, file), shared: true, backend: "pcloud" };
     } catch (e) {
       error = `pCloud: ${e instanceof Error ? e.message : "ошибка загрузки"}`;
     }
@@ -159,7 +159,7 @@ export async function uploadRemoteAudio(
 export async function deleteRemoteAudio(trackId: string, audioUrl?: string): Promise<void> {
   const u = audioUrl ?? "";
   if (u.includes("pcloud.com") || u.includes("pcloud.link")) {
-    await deleteFromPCloud(trackId);
+    await deletePCloudAudio(trackId);
     return;
   }
   if (u.includes("mega.nz") || u.includes("mega.io")) {
@@ -180,6 +180,7 @@ export async function deleteRemoteAudio(trackId: string, audioUrl?: string): Pro
     return;
   }
   // конфигурация могла смениться — чистим все хранилища (best effort)
+  await deletePCloudAudio(trackId);
   await deleteMegaAudio(trackId);
   await deleteR2Audio(trackId);
   await deleteGitHubAudio(trackId, undefined);
