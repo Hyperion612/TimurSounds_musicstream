@@ -381,8 +381,14 @@ export async function uploadCloudAudio(trackId: string, file: File): Promise<str
   try {
     const sb = await storageClient();
     if (!sb) return null;
-    // Используем trackId как имя файла без кодирования (Supabase сам кодирует при необходимости)
-    const path = `${trackId}/${file.name}`;
+    // Нормализуем имя файла: заменяем пробелы и спецсимволы на дефисы
+    // чтобы избежать двойного кодирования в Supabase Storage
+    const normalizedName = file.name
+      .replace(/\s+/g, '-')
+      .replace(/[^\w\-\.]/g, '-')
+      .replace(/-+/g, '-')
+      .toLowerCase();
+    const path = `${trackId}/${normalizedName}`;
     const { error } = await sb.storage.from(AUDIO_BUCKET).upload(path, file, {
       contentType: file.type || "audio/mpeg",
       upsert: true,
