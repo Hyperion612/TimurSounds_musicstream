@@ -1112,25 +1112,65 @@ function StorageSection() {
         <span className={`ml-auto text-[10px] font-display font-bold tracking-[0.2em] px-2.5 py-1.5 rounded border ${
           backend === "mega" || backend === "pcloud" || backend === "r2" || backend === "github" ? "bg-blue/15 border-blue/50 text-sky" : "border-line text-paper/40"
         }`}>
-          {backend === "mega" ? "MEGA АКТИВЕН" : backend === "pcloud" ? "PCLOUD АКТИВЕН" : backend === "r2" ? "R2 АКТИВЕН" : backend === "github" ? "GITHUB АКТИВЕН" : backend === "state" ? "ОБЛАКО SUPABASE" : backend === "supabase" ? "SUPABASE STORAGE" : "ЛОКАЛЬНО"}
+          {backend === "supabase" ? "SUPABASE STORAGE" : backend === "mega" ? "MEGA АКТИВЕН" : backend === "pcloud" ? "PCLOUD АКТИВЕН" : backend === "r2" ? "R2 АКТИВЕН" : backend === "github" ? "GITHUB АКТИВЕН" : backend === "state" ? "ОБЛАКО SUPABASE" : "ЛОКАЛЬНО"}
         </span>
       </div>
       <p className="text-sm text-paper/55 leading-relaxed max-w-2xl">
         Здесь выбирается, где лежат аудиофайлы треков — чтобы они играли у всех слушателей, а не только у вас.
-        Приоритет: GitHub Releases → R2 → pCloud → MEGA → Supabase Storage → локальный IndexedDB.
+        Приоритет: Supabase Storage → R2 → pCloud → MEGA → локальный IndexedDB.
       </p>
+
+      {/* ---------- Supabase Storage ---------- */}
+      <div className={`relative overflow-hidden border rounded-xl p-5 ${backend === "supabase" ? "border-blue/50 bg-gradient-to-br from-navy to-coal" : "border-line bg-ink/40"}`}>
+        <div className="flex flex-wrap items-center gap-3 mb-3">
+          <span className="font-display font-bold text-sm tracking-wider uppercase">Supabase Storage</span>
+          <span className="text-[10px] font-display font-bold tracking-[0.2em] bg-blue text-paper px-2 py-1 rounded">РЕКОМЕНДУЕМ</span>
+          {backend === "supabase" && <span className="text-[10px] tracking-[0.2em] text-sky border border-blue/40 rounded px-2 py-1">АКТИВНО</span>}
+        </div>
+        <p className="text-sm text-paper/55 leading-relaxed max-w-2xl mb-4">
+          Аудиофайлы хранятся в Supabase Storage. Поддерживает CORS, быстрая загрузка и воспроизведение.
+          Треки доступны на всех устройствах через публичные ссылки.
+        </p>
+        <div className="text-xs text-paper/40 leading-relaxed mb-4">
+          <div>✓ Поддерживает CORS (работает из браузера)</div>
+          <div>✓ Быстрая загрузка и воспроизведение</div>
+          <div>✓ 1 ГБ бесплатно на бесплатном тарифе</div>
+          <div>✓ Треки доступны на всех устройствах</div>
+        </div>
+        <div className="bg-ink/40 border border-line rounded-lg p-4 text-xs text-paper/50 space-y-3">
+          <div className="font-semibold text-paper/70 text-sm mb-2">Как настроить Supabase Storage:</div>
+          <ol className="list-decimal list-inside space-y-2">
+            <li>Откройте ваш проект на <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer" className="text-sky hover:underline">supabase.com/dashboard</a></li>
+            <li>Перейдите в <span className="text-paper/70 font-semibold">Storage</span> в левом меню</li>
+            <li>Нажмите <span className="text-paper/70 font-semibold">"New bucket"</span></li>
+            <li>Введите имя: <span className="text-sky font-semibold">ts-audio</span></li>
+            <li>Включите <span className="text-paper/70 font-semibold">"Public bucket"</span></li>
+            <li>Нажмите <span className="text-paper/70 font-semibold">"Create bucket"</span></li>
+            <li>После создания бакета перейдите в <span className="text-paper/70 font-semibold">SQL Editor</span></li>
+            <li>Выполните SQL из файла <span className="text-sky">supabase.sql</span> (кнопка "Скопировать SQL-скрипт" ниже)</li>
+          </ol>
+          <div className="mt-3 p-2 bg-blue/10 border border-blue/30 rounded text-sky text-xs">
+            <span className="font-semibold">Важно:</span> Supabase Storage должен быть подключен в разделе "Синхронизация" выше. Если Supabase не подключен, это хранилище недоступно.
+          </div>
+        </div>
+      </div>
 
       {/* ---------- GitHub Releases ---------- */}
       <div className={`relative overflow-hidden border rounded-xl p-5 ${backend === "github" ? "border-blue/50 bg-gradient-to-br from-navy to-coal" : "border-line bg-ink/40"}`}>
         <div className="flex flex-wrap items-center gap-3 mb-3">
           <span className="font-display font-bold text-sm tracking-wider uppercase">GitHub Releases</span>
-          <span className="text-[10px] font-display font-bold tracking-[0.2em] bg-blue text-paper px-2 py-1 rounded">РЕКОМЕНДУЕМ</span>
+          <span className="text-[10px] font-display font-bold tracking-[0.2em] text-paper/40 px-2 py-1 rounded border border-line">АЛЬТЕРНАТИВА</span>
           {backend === "github" && <span className="text-[10px] tracking-[0.2em] text-sky border border-blue/40 rounded px-2 py-1">АКТИВНО</span>}
         </div>
         <p className="text-sm text-paper/55 leading-relaxed max-w-2xl mb-4">
           Аудиофайлы хранятся в GitHub Releases. Бесплатно, быстро, файлы до 2 ГБ.
           Треки доступны на всех устройствах через публичные ссылки.
         </p>
+        <div className="bg-red/10 border border-red/30 rounded-lg p-3 text-xs text-red mb-4">
+          <span className="font-semibold">⚠️ Важно:</span> GitHub Releases не поддерживает CORS для загрузки файлов из браузера. 
+          Загрузка работает только если вы используете прокси-сервер или загружаете файлы вручную через GitHub UI.
+          Рекомендуем использовать Supabase Storage вместо GitHub.
+        </div>
         <div className="text-xs text-paper/40 leading-relaxed mb-4">
           <div>✓ Бесплатно и без ограничений</div>
           <div>✓ Быстрая загрузка и воспроизведение</div>
