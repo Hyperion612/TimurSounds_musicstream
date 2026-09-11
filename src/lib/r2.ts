@@ -11,6 +11,7 @@
 import { deleteCloudAudio, deleteStateAudio, getSyncMode, uploadCloudAudio, uploadStateAudio } from "./sync";
 import { deleteGitHubAudio, getGhCfg, uploadGitHubAudio } from "./github";
 import { deleteMegaAudio, getMegaCfg, uploadMegaAudio } from "./mega";
+import { deleteFromPCloud, getPCloudConfig, uploadToPCloud } from "./pcloud";
 
 export interface R2Cfg {
   signUrl: string; // https://timursounds-r2-sign.….workers.dev
@@ -40,9 +41,10 @@ export function clearR2Cfg() {
   localStorage.removeItem(LS_R2);
 }
 
-export type AudioBackend = "r2" | "github" | "mega" | "state" | "supabase" | "local";
+export type AudioBackend = "pcloud" | "r2" | "github" | "mega" | "state" | "supabase" | "local";
 
 export function audioBackend(): AudioBackend {
+  if (getPCloudConfig()) return "pcloud";
   if (getMegaCfg()) return "mega";
   if (getR2Cfg()) return "r2";
   if (getGhCfg()) return "github";
@@ -103,9 +105,16 @@ export async function uploadRemoteAudio(
   trackId: string,
   file: File
 ): Promise<{ url: string | null; shared: boolean; backend: AudioBackend; error?: string }> {
-  // MEGA → R2 → GitHub Releases → общее облако данных Supabase → Supabase Storage → локально.
+  // pCloud → MEGA → R2 → GitHub Releases → общее облако данных Supabase → Supabase Storage → локально.
   // Локальная копия в IndexedDB сохранена всегда — трек не пропадёт в любом случае.
   let error: string | undefined;
+  if (getPCloudConfig()) {
+    try {
+      return { url: await uploadToPCloud(trackId, file), shared: true, backend: "pcloud" };
+    } catch (e) {
+      error = `pCloud: ${e instanceof Error ? e.message : "ошибка загрузки"}`;
+    }
+  }
   if (getMegaCfg()) {
     try {
       return { url: await uploadMegaAudio(trackId, file), shared: true, backend: "mega" };
@@ -149,6 +158,10 @@ export async function uploadRemoteAudio(
 /** Удаляет облачное аудио трека из того бэкенда, где оно лежит. */
 export async function deleteRemoteAudio(trackId: string, audioUrl?: string): Promise<void> {
   const u = audioUrl ?? "";
+  if (u.includes("pcloud.com") || u.includes("pcloud.link")) {
+    await deleteFromPCloud(trackId);
+    return;
+  }
   if (u.includes("mega.nz") || u.includes("mega.io")) {
     await deleteMegaAudio(trackId);
     return;

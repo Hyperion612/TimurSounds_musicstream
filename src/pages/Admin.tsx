@@ -9,6 +9,7 @@ import { useStore } from "../lib/store";
 import { configureCloud, disconnectCloud, testCloud } from "../lib/sync";
 import { audioBackend, uploadRemoteAudio } from "../lib/r2";
 import { clearMegaCfg, getMegaCfg, setMegaCfg, testMega } from "../lib/mega";
+import { clearPCloudConfig, getPCloudConfig, initPCloud, testPCloudConnection } from "../lib/pcloud";
 import { Countdown, Cover, Reveal } from "../components/ui";
 import { PauseIcon, PlayIcon } from "../components/cards";
 
@@ -377,6 +378,8 @@ function TrackForm() {
             ? `Трек «${t.title}» опубликован, но ${up.error}. Файл играет только с этого устройства.`
             : `Трек «${t.title}» опубликован, но файл не удалось выгрузить в облако — он играет только с этого устройства`
         );
+      } else if (up.backend === "pcloud") {
+        setMsg(`Трек «${t.title}» опубликован — аудио в pCloud, играет у всех слушателей`);
       } else if (up.backend === "mega") {
         setMsg(`Трек «${t.title}» опубликован — аудио в MEGA, играет у всех слушателей`);
       } else if (up.backend === "r2") {
@@ -915,6 +918,11 @@ export default {
 };`;
 
 function StorageSection() {
+  /* pCloud */
+  const [pcloudToken, setPcloudToken] = useState(() => getPCloudConfig()?.accessToken ?? "");
+  const [pcloudBusy, setPcloudBusy] = useState(false);
+  const [pcloudMsg, setPcloudMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
   /* MEGA */
   const [megaEmail, setMegaEmail] = useState(() => getMegaCfg()?.email ?? "");
   const [megaPassword, setMegaPassword] = useState(() => getMegaCfg()?.password ?? "");
@@ -922,7 +930,26 @@ function StorageSection() {
   const [megaMsg, setMegaMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const backend = audioBackend();
+  const pcloudActive = !!getPCloudConfig();
   const megaActive = !!getMegaCfg();
+
+  const connectPCloud = async () => {
+    if (pcloudBusy) return;
+    if (!pcloudToken.trim()) {
+      setPcloudMsg({ ok: false, text: "Нужен access token pCloud" });
+      return;
+    }
+    setPcloudBusy(true);
+    const res = await testPCloudConnection(pcloudToken.trim());
+    if (!res.ok) {
+      setPcloudMsg({ ok: false, text: res.error ?? "Проверьте токен" });
+      setPcloudBusy(false);
+      return;
+    }
+    initPCloud(pcloudToken.trim());
+    setPcloudMsg({ ok: true, text: "pCloud подключён — аудио загружается в облако" });
+    setPcloudBusy(false);
+  };
 
   const connectMega = async () => {
     if (megaBusy) return;
@@ -948,21 +975,75 @@ function StorageSection() {
         <span className="w-5 h-[3px] bg-blue" />
         <h3 className="font-display font-bold text-sm tracking-wider uppercase">Хранилище аудио</h3>
         <span className={`ml-auto text-[10px] font-display font-bold tracking-[0.2em] px-2.5 py-1.5 rounded border ${
-          backend === "mega" ? "bg-blue/15 border-blue/50 text-sky" : "border-line text-paper/40"
+          backend === "pcloud" || backend === "mega" ? "bg-blue/15 border-blue/50 text-sky" : "border-line text-paper/40"
         }`}>
-          {backend === "mega" ? "MEGA АКТИВЕН" : backend === "r2" ? "R2 АКТИВЕН" : backend === "github" ? "GITHUB АКТИВЕН" : backend === "state" ? "ОБЛАКО SUPABASE" : backend === "supabase" ? "SUPABASE STORAGE" : "ЛОКАЛЬНО"}
+          {backend === "pcloud" ? "PCLOUD АКТИВЕН" : backend === "mega" ? "MEGA АКТИВЕН" : backend === "r2" ? "R2 АКТИВЕН" : backend === "github" ? "GITHUB АКТИВЕН" : backend === "state" ? "ОБЛАКО SUPABASE" : backend === "supabase" ? "SUPABASE STORAGE" : "ЛОКАЛЬНО"}
         </span>
       </div>
       <p className="text-sm text-paper/55 leading-relaxed max-w-2xl">
         Здесь выбирается, где лежат аудиофайлы треков — чтобы они играли у всех слушателей, а не только у вас.
-        Приоритет: MEGA → R2 → GitHub Releases → общее облако Supabase → локальный IndexedDB.
+        Приоритет: pCloud → MEGA → R2 → GitHub Releases → общее облако Supabase → локальный IndexedDB.
       </p>
+
+      {/* ---------- pCloud ---------- */}
+      <div className={`relative overflow-hidden border rounded-xl p-5 ${pcloudActive || backend === "pcloud" ? "border-blue/50 bg-gradient-to-br from-navy to-coal" : "border-line bg-ink/40"}`}>
+        <div className="flex flex-wrap items-center gap-3 mb-3">
+          <span className="font-display font-bold text-sm tracking-wider uppercase">pCloud</span>
+          <span className="text-[10px] font-display font-bold tracking-[0.2em] bg-blue text-paper px-2 py-1 rounded">РЕКОМЕНДУЕМ</span>
+          {pcloudActive && <span className="text-[10px] tracking-[0.2em] text-sky border border-blue/40 rounded px-2 py-1">ПОДКЛЮЧЕН</span>}
+        </div>
+        <p className="text-sm text-paper/55 leading-relaxed max-w-2xl mb-4">
+          Облачное хранилище с прямым стримингом: файлы хранятся в папке <span className="text-sky">/TimurSounds/audio</span> вашего аккаунта pCloud.
+          Бесплатно 10 ГБ, нет лимитов на скачивание, быстрая доставка через CDN. Слушатели слушают треки напрямую по публичным ссылкам.
+        </p>
+
+        {!pcloudActive && (
+          <ol className="space-y-2.5 text-sm text-paper/60 leading-relaxed list-none mb-5">
+            {[
+              <>Зарегистрируйтесь на <span className="text-sky">pcloud.com</span> (бесплатно, 10 ГБ).</>,
+              <>Получите access token: откройте <a href="https://docs.pcloud.com/methods/oauth/authorize.html" target="_blank" rel="noopener noreferrer" className="text-sky underline">документацию OAuth</a> или используйте <a href="https://my.pcloud.com/app#settings" target="_blank" rel="noopener noreferrer" className="text-sky underline">настройки аккаунта</a>.</>,
+              <>Вставьте access token ниже и нажмите «Проверить и подключить».</>,
+              <>Токен хранится только в вашем браузере — используйте отдельный аккаунт pCloud для площадки.</>,
+            ].map((step, i) => (
+              <li key={i} className="flex gap-3">
+                <span className="shrink-0 w-6 h-6 rounded bg-blue/15 border border-blue/40 text-sky font-display font-bold text-xs flex items-center justify-center">{i + 1}</span>
+                <span>{step}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+
+        <div className="grid md:grid-cols-1 gap-4">
+          <Field label="Access token pCloud">
+            <input type="password" value={pcloudToken} onChange={(e) => setPcloudToken(e.target.value)} placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" className={inputCls} />
+          </Field>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 mt-4">
+          <button onClick={() => void connectPCloud()} disabled={pcloudBusy} className={btnPrimary}>
+            {pcloudBusy ? "ПРОВЕРКА…" : pcloudActive ? "ОБНОВИТЬ НАСТРОЙКИ" : "ПРОВЕРИТЬ И ПОДКЛЮЧИТЬ PCLOUD"}
+          </button>
+          {pcloudActive && (
+            <button
+              onClick={() => {
+                if (window.confirm("Отключить pCloud? Уже загруженные треки продолжат играть со своих ссылок, новые пойдут в следующее по приоритету хранилище.")) {
+                  clearPCloudConfig();
+                  setPcloudMsg({ ok: true, text: "pCloud отключён" });
+                }
+              }}
+              className={btnGhost}
+            >
+              ОТКЛЮЧИТЬ PCLOUD
+            </button>
+          )}
+          {pcloudMsg && <span className={msgCls}>{pcloudMsg.text}</span>}
+        </div>
+      </div>
 
       {/* ---------- MEGA ---------- */}
       <div className={`relative overflow-hidden border rounded-xl p-5 ${megaActive || backend === "mega" ? "border-blue/50 bg-gradient-to-br from-navy to-coal" : "border-line bg-ink/40"}`}>
         <div className="flex flex-wrap items-center gap-3 mb-3">
           <span className="font-display font-bold text-sm tracking-wider uppercase">MEGA</span>
-          <span className="text-[10px] font-display font-bold tracking-[0.2em] bg-blue text-paper px-2 py-1 rounded">РЕКОМЕНДУЕМ</span>
+          <span className="text-[10px] font-display font-bold tracking-[0.2em] text-paper/40 px-2 py-1 rounded border border-line">АЛЬТЕРНАТИВА</span>
           {megaActive && <span className="text-[10px] tracking-[0.2em] text-sky border border-blue/40 rounded px-2 py-1">ПОДКЛЮЧЕН</span>}
         </div>
         <p className="text-sm text-paper/55 leading-relaxed max-w-2xl mb-4">
