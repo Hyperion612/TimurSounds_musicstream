@@ -1089,25 +1089,36 @@ function StorageSection() {
       </div>
       <p className="text-sm text-paper/55 leading-relaxed max-w-2xl">
         Здесь выбирается, где лежат аудиофайлы треков — чтобы они играли у всех слушателей, а не только у вас.
-        Приоритет: общее облако Supabase → GitHub Releases → R2 → pCloud → MEGA → локальный IndexedDB.
+        Приоритет: GitHub Releases → R2 → pCloud → MEGA → Supabase Storage → локальный IndexedDB.
       </p>
 
-      {/* ---------- Supabase State ---------- */}
-      <div className={`relative overflow-hidden border rounded-xl p-5 ${backend === "state" ? "border-blue/50 bg-gradient-to-br from-navy to-coal" : "border-line bg-ink/40"}`}>
+      {/* ---------- GitHub Releases ---------- */}
+      <div className={`relative overflow-hidden border rounded-xl p-5 ${backend === "github" ? "border-blue/50 bg-gradient-to-br from-navy to-coal" : "border-line bg-ink/40"}`}>
         <div className="flex flex-wrap items-center gap-3 mb-3">
-          <span className="font-display font-bold text-sm tracking-wider uppercase">Общее облако Supabase</span>
+          <span className="font-display font-bold text-sm tracking-wider uppercase">GitHub Releases</span>
           <span className="text-[10px] font-display font-bold tracking-[0.2em] bg-blue text-paper px-2 py-1 rounded">РЕКОМЕНДУЕМ</span>
-          {backend === "state" && <span className="text-[10px] tracking-[0.2em] text-sky border border-blue/40 rounded px-2 py-1">АКТИВНО</span>}
+          {backend === "github" && <span className="text-[10px] tracking-[0.2em] text-sky border border-blue/40 rounded px-2 py-1">АКТИВНО</span>}
         </div>
         <p className="text-sm text-paper/55 leading-relaxed max-w-2xl mb-4">
-          Аудиофайлы хранятся прямо в базе данных Supabase. Работает автоматически, если подключено облако Supabase.
-          Треки доступны на всех устройствах без дополнительных настроек.
+          Аудиофайлы хранятся в GitHub Releases. Бесплатно, быстро, файлы до 2 ГБ.
+          Треки доступны на всех устройствах через публичные ссылки.
         </p>
-        <div className="text-xs text-paper/40 leading-relaxed">
-          <div>✓ Не требует дополнительных сервисов</div>
-          <div>✓ Работает сразу после подключения Supabase</div>
+        <div className="text-xs text-paper/40 leading-relaxed mb-4">
+          <div>✓ Бесплатно и без ограничений</div>
+          <div>✓ Быстрая загрузка и воспроизведение</div>
+          <div>✓ Файлы до 2 ГБ</div>
           <div>✓ Треки доступны на всех устройствах</div>
-          <div className="mt-2 text-paper/30">Ограничение: файлы до 12 МБ (для больших файлов используйте GitHub Releases или R2)</div>
+        </div>
+        <div className="text-xs text-paper/50 leading-relaxed border-l-2 border-blue pl-3">
+          <div className="font-semibold mb-1">Как создать правильный токен:</div>
+          <ol className="list-decimal list-inside space-y-1 text-paper/40">
+            <li>Перейдите на <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener noreferrer" className="text-sky hover:underline">github.com/settings/tokens?type=beta</a></li>
+            <li>Нажмите "Generate new token"</li>
+            <li>Выберите "Fine-grained token" (не classic!)</li>
+            <li>Repository access: выберите "Only select repositories" → выберите ваш репозиторий</li>
+            <li>Permissions → Repository permissions → Contents: <span className="text-sky font-semibold">Read and write</span></li>
+            <li>Скопируйте токен и вставьте ниже</li>
+          </ol>
         </div>
       </div>
 

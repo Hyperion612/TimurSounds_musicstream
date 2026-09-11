@@ -164,9 +164,14 @@ export async function testGitHub(
     const r = repo.trim();
     if (!o || !r || o.includes("/") || r.includes("/")) return { ok: false, error: "Проверьте владельца и репозиторий" };
     const res = await fetch(`https://api.github.com/repos/${o}/${r}`, { headers: headers(token.trim()) });
-    if (res.status === 401) return { ok: false, error: "Токен недействителен (401)" };
-    if (res.status === 403) return { ok: false, error: "Токену не хватает прав — нужно Contents: Read and write (403)" };
-    if (res.status === 404) return { ok: false, error: "Репозиторий не найден или токен без доступа к нему (404)" };
+    if (res.status === 401) return { ok: false, error: "Токен недействителен (401). Проверьте, что скопировали полный токен." };
+    if (res.status === 403) {
+      return { 
+        ok: false, 
+        error: "Токену не хватает прав (403). Создайте Fine-grained token с правами Contents: Read and write для вашего репозитория. См. инструкцию в админке." 
+      };
+    }
+    if (res.status === 404) return { ok: false, error: "Репозиторий не найден или токен без доступа к нему (404). Проверьте, что репозиторий публичный." };
     if (!res.ok) return { ok: false, error: `GitHub API: ${res.status}` };
     const j = (await res.json()) as { private?: boolean; size?: number };
     return { ok: true, isPrivate: !!j.private, empty: (j.size ?? 1) === 0 };

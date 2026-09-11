@@ -44,11 +44,11 @@ export function clearR2Cfg() {
 export type AudioBackend = "pcloud" | "r2" | "github" | "mega" | "state" | "supabase" | "local";
 
 export function audioBackend(): AudioBackend {
-  if (getSyncMode() === "cloud") return "state";
   if (getGhCfg()) return "github";
   if (getR2Cfg()) return "r2";
   if (getPCloudCfg()) return "pcloud";
   if (getMegaCfg()) return "mega";
+  if (getSyncMode() === "cloud") return "supabase";
   return "local";
 }
 
@@ -108,29 +108,11 @@ export async function uploadRemoteAudio(
   console.log(`[UPLOAD] Начало загрузки трека ${trackId}`);
   const startTime = Date.now();
   
-  // Общее облако данных Supabase → GitHub Releases → R2 → pCloud → MEGA → Supabase Storage → локально.
+  // GitHub Releases → R2 → pCloud → MEGA → Supabase Storage → локально.
   // Локальная копия в IndexedDB сохранена всегда — трек не пропадёт в любом случае.
   let error: string | undefined;
   
-  // Приоритет 1: Общее облако Supabase (самое стабильное)
-  if (getSyncMode() === "cloud") {
-    console.log("[UPLOAD] Попытка загрузки в общее облако Supabase...");
-    try {
-      if (await uploadStateAudio(trackId, file)) {
-        console.log(`[UPLOAD] ✓ Общее облако Supabase загрузка успешна за ${Date.now() - startTime}ms`);
-        return { url: null, shared: true, backend: "state" };
-      }
-      error = "общее облако Supabase не приняло аудиофайл";
-      console.error(`[UPLOAD] ✗ Общее облако Supabase вернуло false за ${Date.now() - startTime}ms`);
-    } catch (e) {
-      error = `общее облако: ${e instanceof Error ? e.message : "ошибка загрузки"}`;
-      console.error(`[UPLOAD] ✗ Общее облако Supabase ошибка за ${Date.now() - startTime}ms:`, error);
-    }
-  } else {
-    console.log("[UPLOAD] Supabase cloud mode не активен, пропускаем");
-  }
-  
-  // Приоритет 2: GitHub Releases
+  // Приоритет 1: GitHub Releases (самое стабильное для аудио)
   if (getGhCfg()) {
     console.log("[UPLOAD] Попытка загрузки в GitHub...");
     try {
@@ -145,7 +127,7 @@ export async function uploadRemoteAudio(
     console.log("[UPLOAD] GitHub не настроен, пропускаем");
   }
   
-  // Приоритет 3: R2
+  // Приоритет 2: R2
   if (getR2Cfg()) {
     console.log("[UPLOAD] Попытка загрузки в R2...");
     try {
@@ -160,7 +142,7 @@ export async function uploadRemoteAudio(
     console.log("[UPLOAD] R2 не настроен, пропускаем");
   }
   
-  // Приоритет 4: pCloud
+  // Приоритет 3: pCloud
   if (getPCloudCfg()) {
     console.log("[UPLOAD] Попытка загрузки в pCloud...");
     try {
@@ -175,7 +157,7 @@ export async function uploadRemoteAudio(
     console.log("[UPLOAD] pCloud не настроен, пропускаем");
   }
   
-  // Приоритет 5: MEGA (последний, так как нестабилен)
+  // Приоритет 4: MEGA (может быть нестабилен)
   if (getMegaCfg()) {
     console.log("[UPLOAD] Попытка загрузки в MEGA...");
     try {
