@@ -10,6 +10,7 @@ import { configureCloud, disconnectCloud, testCloud } from "../lib/sync";
 import { audioBackend, uploadRemoteAudio } from "../lib/r2";
 import { clearMegaCfg, getMegaCfg, setMegaCfg, testMega } from "../lib/mega";
 import { clearPCloudCfg, getPCloudCfg, setPCloudCfg, testPCloud, startPCloudAuth, extractPCloudTokenFromUrl } from "../lib/pcloud";
+import { clearGhCfg, getGhCfg, setGhCfg, testGitHub } from "../lib/github";
 import { Countdown, Cover, Reveal } from "../components/ui";
 import { PauseIcon, PlayIcon } from "../components/cards";
 
@@ -1018,6 +1019,14 @@ export default {
 };`;
 
 function StorageSection() {
+  /* GitHub */
+  const [ghOwner, setGhOwner] = useState(() => getGhCfg()?.owner ?? "");
+  const [ghRepo, setGhRepo] = useState(() => getGhCfg()?.repo ?? "");
+  const [ghToken, setGhToken] = useState(() => getGhCfg()?.token ?? "");
+  const [ghTag, setGhTag] = useState(() => getGhCfg()?.tag ?? "audio-storage");
+  const [ghBusy, setGhBusy] = useState(false);
+  const [ghMsg, setGhMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
   /* pCloud */
   const [pcloudClientId, setPcloudClientId] = useState("");
   const [pcloudBusy, setPcloudBusy] = useState(false);
@@ -1030,6 +1039,7 @@ function StorageSection() {
   const [megaMsg, setMegaMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const backend = audioBackend();
+  const ghActive = !!getGhCfg();
   const pcloudActive = !!getPCloudCfg();
   const megaActive = !!getMegaCfg();
 
@@ -1056,6 +1066,24 @@ function StorageSection() {
     
     setPcloudMsg({ ok: true, text: "Откроется окно авторизации pCloud..." });
     setPcloudBusy(false);
+  };
+
+  const connectGh = async () => {
+    if (ghBusy) return;
+    if (!ghOwner.trim() || !ghRepo.trim() || !ghToken.trim()) {
+      setGhMsg({ ok: false, text: "Нужны владелец, репозиторий и токен" });
+      return;
+    }
+    setGhBusy(true);
+    const res = await testGitHub(ghOwner, ghRepo, ghToken);
+    if (!res.ok) {
+      setGhMsg({ ok: false, text: res.error ?? "Проверьте данные и права токена" });
+      setGhBusy(false);
+      return;
+    }
+    setGhCfg({ owner: ghOwner.trim(), repo: ghRepo.trim(), token: ghToken.trim(), tag: ghTag.trim() || "audio-storage" });
+    setGhMsg({ ok: true, text: `GitHub Releases подключён — аудио загружается в ${ghOwner.trim()}/${ghRepo.trim()}` });
+    setGhBusy(false);
   };
 
   const connectMega = async () => {
@@ -1148,6 +1176,77 @@ function StorageSection() {
           </ol>
           <div className="mt-3 p-2 bg-blue/10 border border-blue/30 rounded text-sky text-xs">
             <span className="font-semibold">Важно:</span> Если вы уже создавали токен, удалите его и создайте новый с правильными правами. Классические токены (classic) не работают!
+          </div>
+        </div>
+
+        {/* Форма для ввода токена */}
+        <div className="mt-4 space-y-3">
+          <div className="grid md:grid-cols-2 gap-4">
+            <Field label="Владелец репозитория">
+              <input
+                type="text"
+                value={ghOwner}
+                onChange={(e) => setGhOwner(e.target.value)}
+                placeholder="Hyperion612"
+                className={inputCls}
+              />
+            </Field>
+            <Field label="Название репозитория">
+              <input
+                type="text"
+                value={ghRepo}
+                onChange={(e) => setGhRepo(e.target.value)}
+                placeholder="timursounds-audio"
+                className={inputCls}
+              />
+            </Field>
+          </div>
+          <Field label="Токен доступа (Fine-grained PAT)">
+            <input
+              type="password"
+              value={ghToken}
+              onChange={(e) => setGhToken(e.target.value)}
+              placeholder="github_pat_..."
+              className={inputCls}
+            />
+          </Field>
+          <Field label="Тег релиза">
+            <input
+              type="text"
+              value={ghTag}
+              onChange={(e) => setGhTag(e.target.value)}
+              placeholder="audio-storage"
+              className={inputCls}
+            />
+          </Field>
+
+          {ghMsg && (
+            <div className={`text-sm p-3 rounded-lg ${ghMsg.ok ? "bg-blue/10 text-sky border border-blue/30" : "bg-red/10 text-red border border-red/30"}`}>
+              {ghMsg.text}
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-3">
+            <button onClick={() => void connectGh()} disabled={ghBusy} className={btnPrimary}>
+              {ghBusy ? "ПРОВЕРКА..." : ghActive ? "ОБНОВИТЬ ТОКЕН" : "ПОДКЛЮЧИТЬ GITHUB"}
+            </button>
+            {ghActive && (
+              <button
+                onClick={() => {
+                  if (window.confirm("Отключить GitHub Releases? Уже загруженные треки продолжат играть со своих ссылок, новые пойдут в следующее по приоритету хранилище.")) {
+                    clearGhCfg();
+                    setGhMsg({ ok: true, text: "GitHub отключён" });
+                    setGhOwner("");
+                    setGhRepo("");
+                    setGhToken("");
+                    setGhTag("audio-storage");
+                  }
+                }}
+                className={btnGhost}
+              >
+                ОТКЛЮЧИТЬ GITHUB
+              </button>
+            )}
           </div>
         </div>
       </div>
