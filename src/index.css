@@ -1,0 +1,242 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #05060a;
+  --color-coal: #0a0c14;
+  --color-panel: #0e1220;
+  --color-line: #1b2136;
+  --color-linehi: #2a3352;
+  --color-blue: #1f5bff;
+  --color-bluehi: #4d7dff;
+  --color-bluedeep: #0a2a7a;
+  --color-navy: #071a45;
+  --color-sky: #8fb0ff;
+  --color-paper: #f2f5ff;
+  --font-display: "Unbounded", system-ui, sans-serif;
+  --font-body: "Golos Text", system-ui, sans-serif;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--color-ink);
+  color: var(--color-paper);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--color-blue);
+  color: #fff;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-ink);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 8px;
+  border: 2px solid var(--color-ink);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-blue);
+}
+
+/* ambient noise overlay */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+}
+
+.bg-grid {
+  background-image: linear-gradient(rgba(31, 91, 255, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(31, 91, 255, 0.06) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+.bg-scan {
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(143, 176, 255, 0.05) 0px,
+    rgba(143, 176, 255, 0.05) 1px,
+    transparent 1px,
+    transparent 4px
+  );
+}
+
+/* ---------- reveal on scroll ---------- */
+.reveal {
+  opacity: 0;
+  transform: translateY(26px);
+  transition: opacity 0.7s ease, transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.reveal.on {
+  opacity: 1;
+  transform: none;
+}
+
+/* ---------- marquee ---------- */
+@keyframes ts-marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+.marquee-track {
+  display: flex;
+  width: max-content;
+  animation: ts-marquee 26s linear infinite;
+}
+.marquee-track:hover {
+  animation-play-state: paused;
+}
+
+/* ---------- equalizer ---------- */
+@keyframes ts-eq {
+  0%,
+  100% {
+    transform: scaleY(0.25);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+.eq {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+}
+.eq span {
+  width: 3px;
+  height: 100%;
+  background: var(--color-blue);
+  transform-origin: bottom;
+  animation: ts-eq 0.9s ease-in-out infinite;
+}
+.eq span:nth-child(2) {
+  animation-delay: 0.15s;
+  background: var(--color-sky);
+}
+.eq span:nth-child(3) {
+  animation-delay: 0.35s;
+}
+.eq span:nth-child(4) {
+  animation-delay: 0.55s;
+  background: var(--color-paper);
+}
+.eq.paused span {
+  animation-play-state: paused;
+  transform: scaleY(0.25);
+}
+
+/* ---------- misc animation ---------- */
+@keyframes ts-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.live-dot {
+  animation: ts-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes ts-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-8px);
+  }
+  40% {
+    transform: translateX(8px);
+  }
+  60% {
+    transform: translateX(-5px);
+  }
+  80% {
+    transform: translateX(5px);
+  }
+}
+.shake {
+  animation: ts-shake 0.4s ease;
+}
+
+@keyframes ts-spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin-slow {
+  animation: ts-spin-slow 14s linear infinite;
+}
+
+@keyframes ts-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(31, 91, 255, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 44px 6px rgba(31, 91, 255, 0.22);
+  }
+}
+.glow {
+  animation: ts-glow 3.2s ease-in-out infinite;
+}
+
+/* ---------- range input (volume) ---------- */
+input[type="range"].vol {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 4px;
+  background: linear-gradient(
+    to right,
+    var(--color-blue) 0%,
+    var(--color-blue) var(--fill, 80%),
+    var(--color-line) var(--fill, 80%),
+    var(--color-line) 100%
+  );
+  outline: none;
+  cursor: pointer;
+}
+input[type="range"].vol::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-paper);
+  border: none;
+  transition: transform 0.15s ease;
+}
+input[type="range"].vol::-webkit-slider-thumb:hover {
+  transform: scale(1.3);
+  background: var(--color-bluehi);
+}
+input[type="range"].vol::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-paper);
+  border: none;
+}
+
+/* thin date input for admin */
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  cursor: pointer;
+}
