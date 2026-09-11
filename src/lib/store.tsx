@@ -53,6 +53,7 @@ interface StoreCtx extends State {
   artistPlays: (artistId: ArtistId) => number;
   artist: (id: ArtistId) => Artist;
   addTrack: (t: Track) => void;
+  updateTrack: (id: string, updates: Partial<Track>) => void;
   deleteTrack: (id: string) => void;
   addRelease: (r: Release) => void;
   updateRelease: (id: string, updates: Partial<Release>) => void;
@@ -313,6 +314,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         state.tracks.reduce((sum, t) => (t.artistId === artistId ? sum + (state.plays[t.id] ?? 0) : sum), 0),
       artist: (id) => state.artists[id],
       addTrack: (t) => mutate((s) => ({ ...s, tracks: [t, ...s.tracks] })),
+      updateTrack: (id, updates) =>
+        mutate((s) => ({
+          ...s,
+          tracks: s.tracks.map((t) => (t.id === id ? { ...t, ...updates } : t)),
+        })),
       deleteTrack: (id) => {
         const t = stateRef.current.tracks.find((x) => x.id === id);
         mutate((s) => ({

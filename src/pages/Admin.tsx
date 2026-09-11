@@ -655,6 +655,106 @@ function EditReleaseForm({ releaseId, onClose }: { releaseId: string; onClose: (
   );
 }
 
+/* ================= edit track form ================= */
+function EditTrackForm({ trackId, onClose }: { trackId: string; onClose: () => void }) {
+  const { getTrack, updateTrack, releases, artists } = useStore();
+  const track = getTrack(trackId);
+  
+  const [title, setTitle] = useState(track?.title ?? "");
+  const [artistId, setArtistId] = useState<ArtistId>(track?.artistId ?? "timur");
+  const [feat, setFeat] = useState<"" | ArtistId>(track?.feat ?? "");
+  const [releaseId, setReleaseId] = useState(track?.releaseId ?? "");
+  const [bpm, setBpm] = useState(track?.bpm ?? 120);
+  const [duration, setDuration] = useState(track?.duration ?? 175);
+  const [cover, setCover] = useState<string | undefined>(track?.cover);
+  const [seed, setSeed] = useState(track?.seed ?? Math.floor(Math.random() * 9000) + 1000);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  if (!track) return null;
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!title.trim() || busy) return;
+    setBusy(true);
+    
+    try {
+      updateTrack(trackId, {
+        title: title.trim().toUpperCase(),
+        artistId,
+        feat: feat || undefined,
+        releaseId: releaseId || undefined,
+        duration,
+        bpm,
+        seed,
+        cover,
+      });
+      setMsg("Трек обновлён");
+      setTimeout(() => onClose(), 1500);
+    } catch {
+      setMsg("Не удалось обновить трек");
+    }
+    setBusy(false);
+  };
+
+  return (
+    <form onSubmit={submit} className="border border-blue/50 rounded-xl bg-coal/80 p-6 space-y-4">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="w-5 h-[3px] bg-blue" />
+        <h3 className="font-display font-bold text-sm tracking-wider uppercase">Редактировать трек</h3>
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-4">
+        <Field label="Название">
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Например: СИНИЙ КОД" className={inputCls} required />
+        </Field>
+        <Field label="Артист">
+          <ArtistSelect value={artistId} onChange={setArtistId} />
+        </Field>
+        <Field label="Feat. (необязательно)">
+          <select value={feat} onChange={(e) => setFeat(e.target.value as "" | ArtistId)} className={inputCls}>
+            <option value="">— без фита —</option>
+            <option value="timur">{artists.timur.name}</option>
+            <option value="instasamka">{artists.instasamka.name}</option>
+          </select>
+        </Field>
+        <Field label="Релиз (необязательно)">
+          <select value={releaseId} onChange={(e) => setReleaseId(e.target.value)} className={inputCls}>
+            <option value="">— вне релиза —</option>
+            {releases.map((r) => (
+              <option key={r.id} value={r.id}>{r.title} · {artists[r.artistId].name}</option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-4">
+        <Field label={`Темп · ${bpm} BPM`}>
+          <input type="range" min={80} max={150} value={bpm} onChange={(e) => setBpm(Number(e.target.value))} className="vol w-full" style={{ ["--fill" as string]: `${((bpm - 80) / 70) * 100}%` }} />
+        </Field>
+        <Field label="Длительность, сек">
+          <input type="number" min={60} max={420} value={duration} onChange={(e) => setDuration(Number(e.target.value))} className={inputCls} />
+        </Field>
+      </div>
+
+      <CoverPicker seed={seed} title={title || "T"} cover={cover} onCover={setCover} />
+
+      <div className="flex flex-wrap items-center gap-3 pt-1">
+        <button type="button" onClick={() => setSeed(Math.floor(Math.random() * 9000) + 1000)} className={btnGhost}>
+          НОВАЯ ГЕНЕРАТИВНАЯ
+        </button>
+        <button type="submit" disabled={busy || !title.trim()} className={btnPrimary}>
+          {busy ? "СОХРАНЕНИЕ…" : "СОХРАНИТЬ ИЗМЕНЕНИЯ"}
+        </button>
+        <button type="button" onClick={onClose} className={btnGhost}>
+          ОТМЕНА
+        </button>
+        {msg && <span className={msgCls}>{msg}</span>}
+      </div>
+    </form>
+  );
+}
+
 /* ================= news form ================= */
 function NewsForm() {
   const { addNews } = useStore();
@@ -1440,6 +1540,7 @@ function ReleasesTab() {
 function Dashboard() {
   const { tracks, releases, news, upcoming, users, deleteTrack, deleteRelease, deleteNews, logout, playsOf, artists, syncMode, resetAll } = useStore();
   const [tab, setTab] = useState<Tab>("tracks");
+  const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
   resetRef.current = resetAll;
 
   const tabs: { id: Tab; label: string; count: number }[] = [
@@ -1483,6 +1584,7 @@ function Dashboard() {
       {tab === "tracks" && (
         <div className="space-y-6">
           <TrackForm />
+          {editingTrackId && <EditTrackForm trackId={editingTrackId} onClose={() => setEditingTrackId(null)} />}
           <div className="border border-line rounded-xl bg-coal/40 divide-y divide-line/60 overflow-hidden">
             {tracks.map((t) => (
               <div key={t.id} className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.03] transition-colors">
@@ -1498,14 +1600,22 @@ function Dashboard() {
                 <span className="hidden sm:block text-xs text-paper/40 tabular-nums">
                   {playsOf(t.id)} {pluralRu(playsOf(t.id), "стрим", "стрима", "стримов")}
                 </span>
-                <button
-                  onClick={() => {
-                    if (window.confirm(`Удалить трек «${t.title}»?`)) deleteTrack(t.id);
-                  }}
-                  className="text-paper/30 hover:text-blue border border-line hover:border-blue rounded-lg px-3 py-2 text-xs font-display font-bold tracking-wider transition-all"
-                >
-                  УДАЛИТЬ
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setEditingTrackId(t.id)}
+                    className="text-paper/50 hover:text-blue border border-line hover:border-blue rounded-lg px-3 py-2 text-xs font-display font-bold tracking-wider transition-all"
+                  >
+                    РЕДАКТИРОВАТЬ
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (window.confirm(`Удалить трек «${t.title}»?`)) deleteTrack(t.id);
+                    }}
+                    className="text-paper/30 hover:text-blue border border-line hover:border-blue rounded-lg px-3 py-2 text-xs font-display font-bold tracking-wider transition-all"
+                  >
+                    УДАЛИТЬ
+                  </button>
+                </div>
               </div>
             ))}
             {!tracks.length && <div className="p-10 text-center text-paper/40">Треков пока нет — загрузите первый выше.</div>}
