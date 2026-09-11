@@ -5,6 +5,7 @@ import { FileSource, SynthSource, setMasterVolume } from "./audio";
 import { getAudio } from "./db";
 import type { Track } from "./data";
 import { useStore } from "./store";
+import { getSyncMode, fetchStateAudio } from "./sync";
 
 interface PlayerCtx {
   track: Track | null;
@@ -78,22 +79,53 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const token = ++tokenRef.current;
     destroySrc();
     let src: Source | null = null;
+    
+    console.log(`[PLAYER] Попытка воспроизведения трека ${t.id} (${t.title})`);
+    
     if (t.kind === "file") {
-      // 1) облачное хранилище — играет на любом устройстве
+      // 1) облачное хранилище (MEGA, GitHub, R2, pCloud) — играет на любом устройстве
       if (t.audioUrl) {
+        console.log(`[PLAYER] Используем облачный URL: ${t.audioUrl}`);
         src = new FileSource(t.audioUrl);
       } else {
+        console.log("[PLAYER] Облачный URL отсутствует, пробуем локальное хранилище...");
         // 2) локальный IndexedDB этого устройства
         try {
           const blob = await getAudio(t.id);
-          if (blob) src = new FileSource(URL.createObjectURL(blob));
-        } catch {
+          if (blob) {
+            console.log("[PLAYER] ✓ Трек найден в локальном IndexedDB");
+            src = new FileSource(URL.createObjectURL(blob));
+          } else {
+            console.log("[PLAYER] Трек не найден в локальном IndexedDB");
+          }
+        } catch (e) {
+          console.error("[PLAYER] Ошибка чтения из IndexedDB:", e);
           src = null;
+        }
+        
+        // 3) если локально нет, пробуем общее облако Supabase
+        if (!src && getSyncMode() === "cloud") {
+          console.log("[PLAYER] Пробуем загрузить из общего облака Supabase...");
+          try {
+            const dataUrl = await fetchStateAudio(t.id);
+            if (dataUrl) {
+              console.log("[PLAYER] ✓ Трек загружен из общего облака Supabase");
+              src = new FileSource(dataUrl);
+            } else {
+              console.log("[PLAYER] Трек не найден в общем облаке Supabase");
+            }
+          } catch (e) {
+            console.error("[PLAYER] Ошибка загрузки из общего облака:", e);
+          }
         }
       }
     }
-    // 3) если аудио недоступно (файл не загрузился) — генеративный звук по сиду трека
-    if (!src) src = new SynthSource({ bpm: t.bpm, seed: t.seed, duration: t.duration });
+    
+    // 4) если аудио недоступно (файл не загрузился) — генеративный звук по сиду трека
+    if (!src) {
+      console.warn("[PLAYER] ✗ Аудио недоступно, используем генеративный звук");
+      src = new SynthSource({ bpm: t.bpm, seed: t.seed, duration: t.duration });
+    }
     if (token !== tokenRef.current) return;
 
     // Резервный генеративный звук: трек обязан зазвучать, даже если файл

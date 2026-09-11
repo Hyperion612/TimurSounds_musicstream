@@ -95,44 +95,56 @@ function fileToArrayBuffer(file: File): Promise<ArrayBuffer> {
 
 /** Загружает аудио в MEGA и возвращает публичную ссылку. */
 export async function uploadMegaAudio(trackId: string, file: File): Promise<string> {
+  const startTime = Date.now();
   console.log(`[MEGA] Начало загрузки трека ${trackId} (${(file.size / 1024 / 1024).toFixed(2)} МБ)`);
   
-  const storage = await getStorage();
-  const audioFolder = await ensureFolder(storage);
-  
-  // Удаляем старый файл с тем же именем, если есть
-  const folderChildren = audioFolder.children || [];
-  const oldFile = folderChildren.find((c: any) => c.name === trackId);
-  if (oldFile) {
-    console.log("[MEGA] Удаление старого файла...");
-    await oldFile.delete();
+  try {
+    console.log("[MEGA] Получение хранилища...");
+    const storage = await getStorage();
+    console.log(`[MEGA] Хранилище получено за ${Date.now() - startTime}ms`);
+    
+    console.log("[MEGA] Поиск/создание папки...");
+    const audioFolder = await ensureFolder(storage);
+    console.log(`[MEGA] Папка готова за ${Date.now() - startTime}ms`);
+    
+    // Удаляем старый файл с тем же именем, если есть
+    const folderChildren = audioFolder.children || [];
+    const oldFile = folderChildren.find((c: any) => c.name === trackId);
+    if (oldFile) {
+      console.log("[MEGA] Удаление старого файла...");
+      await oldFile.delete();
+      console.log(`[MEGA] Старый файл удалён за ${Date.now() - startTime}ms`);
+    }
+    
+    console.log("[MEGA] Чтение файла в память...");
+    const buffer = await fileToArrayBuffer(file);
+    console.log(`[MEGA] Файл прочитан за ${Date.now() - startTime}ms`);
+    
+    console.log("[MEGA] Начало загрузки в MEGA...");
+    const uploaded = await audioFolder.upload(
+      { name: trackId, size: buffer.byteLength },
+      new Uint8Array(buffer)
+    );
+    
+    console.log("[MEGA] Ожидание завершения загрузки...");
+    await uploaded.complete;
+    console.log(`[MEGA] Файл загружен за ${Date.now() - startTime}ms`);
+    
+    // Получаем публичную ссылку
+    console.log("[MEGA] Получение публичной ссылки...");
+    const link = await uploaded.link();
+    
+    if (!link) {
+      throw new Error("Не удалось получить публичную ссылку на файл");
+    }
+    
+    console.log(`[MEGA] ✓ Загрузка завершена за ${Date.now() - startTime}ms`);
+    console.log(`[MEGA] Публичная ссылка: ${link}`);
+    return link;
+  } catch (error) {
+    console.error(`[MEGA] ✗ Ошибка загрузки за ${Date.now() - startTime}ms:`, error);
+    throw error;
   }
-  
-  console.log("[MEGA] Чтение файла...");
-  const buffer = await fileToArrayBuffer(file);
-  
-  console.log("[MEGA] Загрузка файла...");
-  const uploaded = await audioFolder.upload(
-    { name: trackId, size: buffer.byteLength },
-    new Uint8Array(buffer)
-  );
-  
-  console.log("[MEGA] Ожидание завершения загрузки...");
-  await uploaded.complete;
-  
-  // Получаем публичную ссылку
-  console.log("[MEGA] Получение публичной ссылки...");
-  
-  // Метод link() возвращает Promise, который резолвится в публичную ссылку
-  // Формат: https://mega.nz/file/downloadId#key
-  const link = await uploaded.link();
-  
-  if (!link) {
-    throw new Error("Не удалось получить публичную ссылку на файл");
-  }
-  
-  console.log(`[MEGA] Загрузка завершена: ${link}`);
-  return link;
 }
 
 /** Удаляет аудио из MEGA (best effort). */

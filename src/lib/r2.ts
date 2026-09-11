@@ -105,53 +105,101 @@ export async function uploadRemoteAudio(
   trackId: string,
   file: File
 ): Promise<{ url: string | null; shared: boolean; backend: AudioBackend; error?: string }> {
+  console.log(`[UPLOAD] Начало загрузки трека ${trackId}`);
+  const startTime = Date.now();
+  
   // MEGA → R2 → GitHub Releases → pCloud → общее облако данных Supabase → Supabase Storage → локально.
   // Локальная копия в IndexedDB сохранена всегда — трек не пропадёт в любом случае.
   let error: string | undefined;
+  
   if (getMegaCfg()) {
+    console.log("[UPLOAD] Попытка загрузки в MEGA...");
     try {
-      return { url: await uploadMegaAudio(trackId, file), shared: true, backend: "mega" };
+      const url = await uploadMegaAudio(trackId, file);
+      console.log(`[UPLOAD] ✓ MEGA загрузка успешна за ${Date.now() - startTime}ms`);
+      return { url, shared: true, backend: "mega" };
     } catch (e) {
       error = `MEGA: ${e instanceof Error ? e.message : "ошибка загрузки"}`;
+      console.error(`[UPLOAD] ✗ MEGA ошибка за ${Date.now() - startTime}ms:`, error);
     }
+  } else {
+    console.log("[UPLOAD] MEGA не настроен, пропускаем");
   }
+  
   if (getPCloudCfg()) {
+    console.log("[UPLOAD] Попытка загрузки в pCloud...");
     try {
-      return { url: await uploadPCloudAudio(trackId, file), shared: true, backend: "pcloud" };
+      const url = await uploadPCloudAudio(trackId, file);
+      console.log(`[UPLOAD] ✓ pCloud загрузка успешна за ${Date.now() - startTime}ms`);
+      return { url, shared: true, backend: "pcloud" };
     } catch (e) {
       error = `pCloud: ${e instanceof Error ? e.message : "ошибка загрузки"}`;
+      console.error(`[UPLOAD] ✗ pCloud ошибка за ${Date.now() - startTime}ms:`, error);
     }
+  } else {
+    console.log("[UPLOAD] pCloud не настроен, пропускаем");
   }
+  
   if (getR2Cfg()) {
+    console.log("[UPLOAD] Попытка загрузки в R2...");
     try {
-      return { url: await uploadR2Audio(trackId, file), shared: true, backend: "r2" };
+      const url = await uploadR2Audio(trackId, file);
+      console.log(`[UPLOAD] ✓ R2 загрузка успешна за ${Date.now() - startTime}ms`);
+      return { url, shared: true, backend: "r2" };
     } catch (e) {
       error = `R2: ${e instanceof Error ? e.message : "ошибка загрузки"}`;
+      console.error(`[UPLOAD] ✗ R2 ошибка за ${Date.now() - startTime}ms:`, error);
     }
+  } else {
+    console.log("[UPLOAD] R2 не настроен, пропускаем");
   }
+  
   if (getGhCfg()) {
+    console.log("[UPLOAD] Попытка загрузки в GitHub...");
     try {
-      return { url: await uploadGitHubAudio(trackId, file), shared: true, backend: "github" };
+      const url = await uploadGitHubAudio(trackId, file);
+      console.log(`[UPLOAD] ✓ GitHub загрузка успешна за ${Date.now() - startTime}ms`);
+      return { url, shared: true, backend: "github" };
     } catch (e) {
       error = `GitHub: ${e instanceof Error ? e.message : "ошибка загрузки"}`;
+      console.error(`[UPLOAD] ✗ GitHub ошибка за ${Date.now() - startTime}ms:`, error);
     }
+  } else {
+    console.log("[UPLOAD] GitHub не настроен, пропускаем");
   }
+  
   if (getSyncMode() === "cloud") {
+    console.log("[UPLOAD] Попытка загрузки в общее облако Supabase...");
     // Общее облако данных: работает без бакетов и токенов — раз данные синхронизируются,
     // то и аудио теперь будет доступно на всех устройствах.
     try {
-      if (await uploadStateAudio(trackId, file)) return { url: null, shared: true, backend: "state" };
+      if (await uploadStateAudio(trackId, file)) {
+        console.log(`[UPLOAD] ✓ Общее облако Supabase загрузка успешна за ${Date.now() - startTime}ms`);
+        return { url: null, shared: true, backend: "state" };
+      }
       error = "общее облако Supabase не приняло аудиофайл";
+      console.error(`[UPLOAD] ✗ Общее облако Supabase вернуло false за ${Date.now() - startTime}ms`);
     } catch (e) {
       error = `общее облако: ${e instanceof Error ? e.message : "ошибка загрузки"}`;
+      console.error(`[UPLOAD] ✗ Общее облако Supabase ошибка за ${Date.now() - startTime}ms:`, error);
     }
+    
+    console.log("[UPLOAD] Попытка загрузки в Supabase Storage...");
     try {
       const url = await uploadCloudAudio(trackId, file);
-      if (url) return { url, shared: true, backend: "supabase" };
-    } catch {
+      if (url) {
+        console.log(`[UPLOAD] ✓ Supabase Storage загрузка успешна за ${Date.now() - startTime}ms`);
+        return { url, shared: true, backend: "supabase" };
+      }
+    } catch (e) {
+      console.error(`[UPLOAD] ✗ Supabase Storage ошибка за ${Date.now() - startTime}ms:`, e);
       /* бакет Storage может отсутствовать — общее облако выше уже попробовано */
     }
+  } else {
+    console.log("[UPLOAD] Supabase cloud mode не активен, пропускаем");
   }
+  
+  console.log(`[UPLOAD] ✗ Все облачные хранилища недоступны, используем локальное хранилище за ${Date.now() - startTime}ms`);
   return { url: null, shared: false, backend: "local", error };
 }
 

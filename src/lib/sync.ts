@@ -435,35 +435,86 @@ function blobToDataUrl(blob: Blob): Promise<string> {
  * Если облако не подключено — false (трек остаётся локальным).
  */
 export async function uploadStateAudio(trackId: string, blob: Blob): Promise<boolean> {
+  const startTime = Date.now();
+  console.log(`[STATE_AUDIO] Начало загрузки трека ${trackId} (${(blob.size / 1024 / 1024).toFixed(2)} МБ)`);
+  
   try {
+    console.log("[STATE_AUDIO] Получение клиента Supabase...");
     const sb = await storageClient();
-    if (!sb) return false;
-    if (blob.size > 12 * 1024 * 1024) {
-      console.warn(`[TimurSounds] аудио ${trackId} больше 12 МБ — общее хранилище может работать медленно, рекомендуется GitHub Releases / R2`);
+    if (!sb) {
+      console.log("[STATE_AUDIO] ✗ Supabase клиент не инициализирован");
+      return false;
     }
+    console.log(`[STATE_AUDIO] Клиент получен за ${Date.now() - startTime}ms`);
+    
+    if (blob.size > 12 * 1024 * 1024) {
+      console.warn(`[STATE_AUDIO] аудио ${trackId} больше 12 МБ — общее хранилище может работать медленно`);
+    }
+    
+    console.log("[STATE_AUDIO] Конвертация файла в data URL...");
     const dataUrl = await blobToDataUrl(blob);
+    console.log(`[STATE_AUDIO] Data URL создан за ${Date.now() - startTime}ms (размер: ${(dataUrl.length / 1024 / 1024).toFixed(2)} МБ)`);
+    
+    console.log("[STATE_AUDIO] Чтение текущей карты аудио...");
     const map = await readAudioMap(sb);
+    console.log(`[STATE_AUDIO] Карта прочитана за ${Date.now() - startTime}ms (${Object.keys(map).length} треков)`);
+    
+    console.log("[STATE_AUDIO] Добавление трека в карту...");
     map[trackId] = dataUrl;
+    
+    console.log("[STATE_AUDIO] Загрузка карты в Supabase...");
     const { error } = await sb.from("platform_state").upsert({ id: AUDIO_ROW_ID, data: map });
-    if (error) throw new Error(error.message);
+    if (error) {
+      console.error(`[STATE_AUDIO] ✗ Ошибка Supabase за ${Date.now() - startTime}ms:`, error.message);
+      throw new Error(error.message);
+    }
+    
+    console.log(`[STATE_AUDIO] ✓ Трек загружен в общее облако за ${Date.now() - startTime}ms`);
     return true;
   } catch (e) {
-    console.warn("[TimurSounds] не удалось сохранить аудио в общее облако:", e);
+    console.error(`[STATE_AUDIO] ✗ Ошибка загрузки за ${Date.now() - startTime}ms:`, e);
     return false;
   }
 }
 
 /** Скачивает аудио трека из общего облака (только один трек, не всю карту). */
 export async function fetchStateAudio(trackId: string): Promise<string | null> {
+  const startTime = Date.now();
+  console.log(`[FETCH_AUDIO] Запрос трека ${trackId} из общего облака...`);
+  
   try {
     const sb = await storageClient();
-    if (!sb) return null;
-    if (!/^[a-zA-Z0-9_-]+$/.test(trackId)) return null;
-    const { data } = await sb.from("platform_state").select(`audio:data->>${trackId}`).eq("id", AUDIO_ROW_ID).maybeSingle();
+    if (!sb) {
+      console.log("[FETCH_AUDIO] ✗ Supabase клиент не инициализирован");
+      return null;
+    }
+    console.log(`[FETCH_AUDIO] Клиент получен за ${Date.now() - startTime}ms`);
+    
+    if (!/^[a-zA-Z0-9_-]+$/.test(trackId)) {
+      console.log("[FETCH_AUDIO] ✗ Неверный формат trackId");
+      return null;
+    }
+    
+    console.log("[FETCH_AUDIO] Выполнение запроса к Supabase...");
+    const { data, error } = await sb.from("platform_state").select(`audio:data->>${trackId}`).eq("id", AUDIO_ROW_ID).maybeSingle();
+    
+    if (error) {
+      console.error(`[FETCH_AUDIO] ✗ Ошибка Supabase за ${Date.now() - startTime}ms:`, error.message);
+      return null;
+    }
+    
     const row = data as Record<string, unknown> | null;
     const val = row ? Object.values(row)[0] : null;
-    return typeof val === "string" && val.startsWith("data:audio") ? val : null;
-  } catch {
+    
+    if (typeof val === "string" && val.startsWith("data:audio")) {
+      console.log(`[FETCH_AUDIO] ✓ Трек получен за ${Date.now() - startTime}ms (размер: ${(val.length / 1024 / 1024).toFixed(2)} МБ)`);
+      return val;
+    } else {
+      console.log(`[FETCH_AUDIO] ✗ Трек не найден в общем облаке за ${Date.now() - startTime}ms`);
+      return null;
+    }
+  } catch (e) {
+    console.error(`[FETCH_AUDIO] ✗ Ошибка за ${Date.now() - startTime}ms:`, e);
     return null;
   }
 }
