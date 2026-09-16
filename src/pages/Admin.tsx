@@ -528,12 +528,15 @@ function ReleaseForm() {
   const [coverSeed, setCoverSeed] = useState(() => Math.floor(Math.random() * 500) + 200);
   const [cover, setCover] = useState<string | undefined>();
   const [msg, setMsg] = useState("");
+  const [createdReleaseId, setCreatedReleaseId] = useState<string | null>(null);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
+    const releaseId = `r${Date.now().toString(36)}`;
     addRelease({
-      id: `r${Date.now().toString(36)}`,
+      id: releaseId,
       title: title.trim().toUpperCase(),
       artistId,
       kind,
@@ -541,10 +544,18 @@ function ReleaseForm() {
       coverSeed,
       cover,
     });
-    setMsg(`Релиз «${title.trim().toUpperCase()}» создан`);
-    setTitle("");
-    setCover(undefined);
-    setCoverSeed(Math.floor(Math.random() * 500) + 200);
+    
+    if (kind === "album" || kind === "ep") {
+      // Для альбома/EP сразу предлагаем загрузить треки
+      setCreatedReleaseId(releaseId);
+      setShowBulkUpload(true);
+      setMsg(`Релиз «${title.trim().toUpperCase()}» создан. Добавьте треки ниже.`);
+    } else {
+      setMsg(`Релиз «${title.trim().toUpperCase()}» создан`);
+      setTitle("");
+      setCover(undefined);
+      setCoverSeed(Math.floor(Math.random() * 500) + 200);
+    }
     setTimeout(() => setMsg(""), 3000);
   };
 
@@ -572,17 +583,257 @@ function ReleaseForm() {
         </Field>
       </div>
       <CoverPicker seed={coverSeed} title={title || "Релиз"} cover={cover} onCover={setCover} />
-      <div className="flex flex-wrap items-end gap-3">
-        <Field label="Год">
-          <input type="number" min={2000} max={2100} value={year} onChange={(e) => setYear(Number(e.target.value))} className={`${inputCls} w-28`} />
-        </Field>
-        <button type="button" onClick={() => setCoverSeed(Math.floor(Math.random() * 500) + 200)} className={btnGhost}>
-          ДРУГАЯ ГЕНЕРАТИВНАЯ
-        </button>
-        <button type="submit" className={btnPrimary}>СОЗДАТЬ РЕЛИЗ</button>
-        {msg && <span className={msgCls}>{msg}</span>}
-      </div>
+      
+      {showBulkUpload && createdReleaseId ? (
+        <BulkTrackUpload 
+          releaseId={createdReleaseId} 
+          artistId={artistId} 
+          onClose={() => {
+            setShowBulkUpload(false);
+            setCreatedReleaseId(null);
+            setTitle("");
+            setCover(undefined);
+            setCoverSeed(Math.floor(Math.random() * 500) + 200);
+          }} 
+        />
+      ) : (
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Год">
+            <input type="number" min={2000} max={2100} value={year} onChange={(e) => setYear(Number(e.target.value))} className={`${inputCls} w-28`} />
+          </Field>
+          <button type="button" onClick={() => setCoverSeed(Math.floor(Math.random() * 500) + 200)} className={btnGhost}>
+            ДРУГАЯ ГЕНЕРАТИВНАЯ
+          </button>
+          <button type="submit" className={btnPrimary}>СОЗДАТЬ РЕЛИЗ</button>
+          {msg && <span className={msgCls}>{msg}</span>}
+        </div>
+      )}
     </form>
+  );
+}
+
+/* ================= bulk track upload ================= */
+function BulkTrackUpload({ releaseId, artistId: defaultArtistId, onClose }: { releaseId: string; artistId: ArtistId; onClose: () => void }) {
+  const { addTrack, artists } = useStore();
+  const [files, setFiles] = useState<File[]>([]);
+  const [artistId, setArtistId] = useState<ArtistId>(defaultArtistId);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [msg, setMsg] = useState("");
+  const [errors, setErrors] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(e.target.files || []);
+    const valid = selected.filter(f => f.type.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|aac|flac)$/i.test(f.name));
+    const invalid = selected.filter(f => !valid.includes(f));
+    
+    if (invalid.length > 0) {
+      setErrors([`${invalid.length} файл(ов) не являются аудиофайлами и будут пропущены`]);
+    } else {
+      setErrors([]);
+    }
+    
+    setFiles(valid);
+  };
+
+  const removeFile = (index: number) => {
+    setFiles(files.filter((_, i) => i !== index));
+  };
+
+  const uploadAll = async () => {
+    if (files.length === 0) return;
+    
+    setBusy(true);
+    setProgress(0);
+    setErrors([]);
+    
+    const errors: string[] = [];
+    
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const id = `u${Date.now().toString(36)}${i}`;
+      
+      try {
+        // Читаем метаданные
+        const meta = await readAudioMeta(file);
+        const title = meta.title || file.name.replace(/\.[^/.]+$/, "").toUpperCase();
+        
+        // Загружаем в локальное хранилище
+        await putAudio(id, file);
+        
+        // Создаём обложку из метаданных или генерируем
+        let cover: string | undefined;
+        if (meta.cover) {
+          try {
+            cover = await imageToCoverDataUrl(meta.cover);
+          } catch {
+            // ignore
+          }
+        }
+        
+        // Определяем длительность
+        const duration = await new Promise<number>((resolve) => {
+          const audio = new Audio();
+          audio.addEventListener('loadedmetadata', () => {
+            resolve(Math.round(audio.duration));
+          });
+          audio.addEventListener('error', () => {
+            resolve(180); // fallback
+          });
+          audio.src = URL.createObjectURL(file);
+        });
+        
+        // Создаём трек
+        const track: Track = {
+          id,
+          title,
+          artistId,
+          releaseId,
+          duration,
+          bpm: 120, // default
+          seed: Math.floor(Math.random() * 9000) + 1000,
+          kind: "file",
+          addedAt: Date.now(),
+          cover,
+        };
+        
+        addTrack(track);
+        setProgress(((i + 1) / files.length) * 100);
+      } catch (e) {
+        errors.push(`Ошибка загрузки "${file.name}": ${e instanceof Error ? e.message : 'неизвестная ошибка'}`);
+      }
+    }
+    
+    setBusy(false);
+    
+    if (errors.length > 0) {
+      setErrors(errors);
+      setMsg(`Загружено ${files.length - errors.length} из ${files.length} треков`);
+    } else {
+      setMsg(`Успешно загружено ${files.length} треков`);
+      setTimeout(() => onClose(), 2000);
+    }
+  };
+
+  return (
+    <div className="border border-blue/50 rounded-xl bg-coal/80 p-6 space-y-4">
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2">
+          <span className="w-5 h-[3px] bg-blue" />
+          <h3 className="font-display font-bold text-sm tracking-wider uppercase">Массовая загрузка треков</h3>
+        </div>
+        <button onClick={onClose} className="text-paper/40 hover:text-paper transition-colors">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      
+      <p className="text-xs text-paper/45">
+        Выберите несколько аудиофайлов для добавления в релиз. Треки будут автоматически привязаны к этому релизу.
+      </p>
+      
+      <div className="space-y-3">
+        <Field label="Артист">
+          <ArtistSelect value={artistId} onChange={setArtistId} />
+        </Field>
+        
+        <div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="audio/*"
+            multiple
+            onChange={handleFiles}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={busy}
+            className="w-full border-2 border-dashed border-line hover:border-blue rounded-lg p-6 text-center transition-colors disabled:opacity-50"
+          >
+            <div className="text-paper/60 text-sm">
+              {files.length > 0 ? `Выбрано файлов: ${files.length}` : 'Нажмите для выбора аудиофайлов'}
+            </div>
+            <div className="text-paper/40 text-xs mt-1">
+              Поддерживаются: MP3, WAV, OGG, M4A, AAC, FLAC
+            </div>
+          </button>
+        </div>
+        
+        {errors.length > 0 && (
+          <div className="bg-red/10 border border-red/30 rounded-lg p-3 text-xs text-red">
+            {errors.map((err, i) => <div key={i}>{err}</div>)}
+          </div>
+        )}
+        
+        {files.length > 0 && (
+          <div className="border border-line rounded-lg p-3 max-h-60 overflow-y-auto space-y-2">
+            {files.map((file, i) => (
+              <div key={i} className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <span className="text-paper/40">{i + 1}.</span>
+                  <span className="truncate">{file.name}</span>
+                  <span className="text-paper/40 shrink-0">({(file.size / 1024 / 1024).toFixed(1)} МБ)</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeFile(i)}
+                  disabled={busy}
+                  className="text-paper/40 hover:text-red transition-colors disabled:opacity-50 shrink-0 ml-2"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {busy && (
+          <div className="space-y-2">
+            <div className="flex justify-between text-xs text-paper/60">
+              <span>Загрузка...</span>
+              <span>{Math.round(progress)}%</span>
+            </div>
+            <div className="h-2 bg-ink rounded-full overflow-hidden">
+              <div
+                className="h-full bg-blue transition-all duration-300"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          </div>
+        )}
+        
+        {msg && (
+          <div className={`text-xs p-3 rounded-lg ${msg.includes('Успешно') ? 'bg-blue/10 text-sky border border-blue/30' : 'bg-yellow/10 text-yellow border border-yellow/30'}`}>
+            {msg}
+          </div>
+        )}
+        
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={uploadAll}
+            disabled={files.length === 0 || busy}
+            className={btnPrimary}
+          >
+            {busy ? 'ЗАГРУЗКА...' : `ЗАГРУЗИТЬ ${files.length} ТРЕК(ОВ)`}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className={btnGhost}
+          >
+            ОТМЕНА
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -597,6 +848,7 @@ function EditReleaseForm({ releaseId, onClose }: { releaseId: string; onClose: (
   const [cover, setCover] = useState<string | undefined>(release?.cover);
   const [coverSeed, setCoverSeed] = useState(release?.coverSeed ?? Math.floor(Math.random() * 500) + 200);
   const [msg, setMsg] = useState("");
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
 
   if (!release) return null;
 
@@ -639,19 +891,33 @@ function EditReleaseForm({ releaseId, onClose }: { releaseId: string; onClose: (
         </Field>
       </div>
       <CoverPicker seed={coverSeed} title={title || "Релиз"} cover={cover} onCover={setCover} />
-      <div className="flex flex-wrap items-end gap-3">
-        <Field label="Год">
-          <input type="number" min={2000} max={2100} value={year} onChange={(e) => setYear(Number(e.target.value))} className={`${inputCls} w-28`} />
-        </Field>
-        <button type="button" onClick={() => setCoverSeed(Math.floor(Math.random() * 500) + 200)} className={btnGhost}>
-          ДРУГАЯ ГЕНЕРАТИВНАЯ
-        </button>
-        <button type="submit" className={btnPrimary}>СОХРАНИТЬ ИЗМЕНЕНИЯ</button>
-        <button type="button" onClick={onClose} className={btnGhost}>
-          ОТМЕНА
-        </button>
-        {msg && <span className={msgCls}>{msg}</span>}
-      </div>
+      
+      {showBulkUpload ? (
+        <BulkTrackUpload 
+          releaseId={releaseId} 
+          artistId={artistId} 
+          onClose={() => setShowBulkUpload(false)} 
+        />
+      ) : (
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Год">
+            <input type="number" min={2000} max={2100} value={year} onChange={(e) => setYear(Number(e.target.value))} className={`${inputCls} w-28`} />
+          </Field>
+          <button type="button" onClick={() => setCoverSeed(Math.floor(Math.random() * 500) + 200)} className={btnGhost}>
+            ДРУГАЯ ГЕНЕРАТИВНАЯ
+          </button>
+          <button type="submit" className={btnPrimary}>СОХРАНИТЬ ИЗМЕНЕНИЯ</button>
+          {(kind === "album" || kind === "ep") && (
+            <button type="button" onClick={() => setShowBulkUpload(true)} className={btnGhost}>
+              ДОБАВИТЬ ТРЕКИ
+            </button>
+          )}
+          <button type="button" onClick={onClose} className={btnGhost}>
+            ОТМЕНА
+          </button>
+          {msg && <span className={msgCls}>{msg}</span>}
+        </div>
+      )}
     </form>
   );
 }
