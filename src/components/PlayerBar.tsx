@@ -1,10 +1,12 @@
-import { useState } from "react";
 import { fmtTime } from "../lib/data";
 import { usePlayer } from "../lib/player";
 import { useStore } from "../lib/store";
 import { Cover, Eq } from "./ui";
 import { HeartIcon, PauseIcon, PlayIcon } from "./cards";
-import { FullScreenPlayer } from "./FullScreenPlayer";
+
+interface PlayerBarProps {
+  onOpenFullScreen?: () => void;
+}
 
 function SkipIcon({ back = false }: { back?: boolean }) {
   return (
@@ -15,10 +17,9 @@ function SkipIcon({ back = false }: { back?: boolean }) {
   );
 }
 
-export function PlayerBar() {
+export function PlayerBar({ onOpenFullScreen }: PlayerBarProps) {
   const { track, playing, position, toggle, next, prev, seek, volume, setVolume, repeat, toggleRepeat, queue, qIndex } = usePlayer();
   const { favs, toggleFav, artist: getArtist, online } = useStore();
-  const [fullScreenOpen, setFullScreenOpen] = useState(false);
 
   const dur = track?.duration ?? 0;
   const artist = track ? getArtist(track.artistId) : null;
@@ -35,7 +36,7 @@ export function PlayerBar() {
         {/* meta */}
         <div 
           className="flex items-center gap-3 min-w-0 cursor-pointer lg:cursor-default"
-          onClick={() => track && setFullScreenOpen(true)}
+          onClick={() => track && onOpenFullScreen?.()}
         >
           {track ? (
             <>
@@ -135,8 +136,6 @@ export function PlayerBar() {
           </div>
         </div>
       </div>
-      
-      <FullScreenPlayer isOpen={fullScreenOpen} onClose={() => setFullScreenOpen(false)} />
     </footer>
   );
 }

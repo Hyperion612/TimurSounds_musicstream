@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useStore } from "../lib/store";
 import { PlayerBar } from "./PlayerBar";
 import { AuthModal } from "./AuthModal";
+import { FullScreenPlayer } from "./FullScreenPlayer";
 
 function Logo() {
   return (
@@ -53,6 +54,7 @@ export function Shell() {
   const { artist, syncMode, currentUser, userLogout, favs, syncWarning } = useStore();
   const [authOpen, setAuthOpen] = useState(false);
   const [fallbackTitle, setFallbackTitle] = useState<string | null>(null);
+  const [fullScreenPlayerOpen, setFullScreenPlayerOpen] = useState(false);
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, [loc.pathname]);
@@ -203,8 +205,9 @@ export function Shell() {
         </div>
       )}
 
-      <PlayerBar />
+      <PlayerBar onOpenFullScreen={() => setFullScreenPlayerOpen(true)} />
       <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
+      <FullScreenPlayer isOpen={fullScreenPlayerOpen} onClose={() => setFullScreenPlayerOpen(false)} />
     </div>
   );
 }
