@@ -476,7 +476,7 @@ function TrackForm() {
             <input type="range" min={80} max={150} value={bpm} onChange={(e) => setBpm(Number(e.target.value))} className="vol w-full" style={{ ["--fill" as string]: `${((bpm - 80) / 70) * 100}%` }} />
           </Field>
           <Field label="Длительность, сек">
-            <input type="number" min={60} max={420} value={duration} onChange={(e) => setDuration(Number(e.target.value))} className={inputCls} />
+            <input type="number" min={0} value={duration} onChange={(e) => setDuration(Number(e.target.value))} className={inputCls} />
           </Field>
           <div className="flex gap-2">
             <button type="button" onClick={() => setSeed(Math.floor(Math.random() * 9000) + 1000)} className={`${btnGhost} flex-1`}>
@@ -1054,7 +1054,7 @@ function EditTrackForm({ trackId, onClose }: { trackId: string; onClose: () => v
           <input type="range" min={80} max={150} value={bpm} onChange={(e) => setBpm(Number(e.target.value))} className="vol w-full" style={{ ["--fill" as string]: `${((bpm - 80) / 70) * 100}%` }} />
         </Field>
         <Field label="Длительность, сек">
-          <input type="number" min={60} max={420} value={duration} onChange={(e) => setDuration(Number(e.target.value))} className={inputCls} />
+          <input type="number" min={0} value={duration} onChange={(e) => setDuration(Number(e.target.value))} className={inputCls} />
         </Field>
       </div>
 
