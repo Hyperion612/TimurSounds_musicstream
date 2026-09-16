@@ -1,4 +1,4 @@
-export type ArtistId = "timur" | "instasamka";
+export type ArtistId = string;
 export type ReleaseKind = "album" | "single" | "ep";
 export type NewsTag = "релиз" | "обновление" | "событие";
 
@@ -8,6 +8,7 @@ export interface Artist {
   label: string;
   role: string;
   bio: string;
+  isCustom?: boolean; // true для пользовательских артистов
 }
 
 export interface Release {

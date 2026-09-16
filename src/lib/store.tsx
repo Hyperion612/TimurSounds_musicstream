@@ -63,6 +63,7 @@ interface StoreCtx extends State {
   addUpcoming: (u: Upcoming) => void;
   removeUpcoming: (id: string) => void;
   saveArtist: (a: Artist) => void;
+  addArtist: (name: string, label?: string) => Artist;
   incPlays: (trackId: string) => void;
   resetAll: () => void;
   favs: string[];
@@ -349,6 +350,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addUpcoming: (u) => mutate((s) => ({ ...s, upcoming: [...s.upcoming, u].sort((a, b) => a.date - b.date) })),
       removeUpcoming: (id) => mutate((s) => ({ ...s, upcoming: s.upcoming.filter((u) => u.id !== id) })),
       saveArtist: (a) => mutate((s) => ({ ...s, artists: { ...s.artists, [a.id]: a } })),
+      addArtist: (name, label = "Независимый артист") => {
+        const id = `custom_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+        const artist: Artist = {
+          id,
+          name: name.toUpperCase(),
+          label,
+          role: "гостевой артист",
+          bio: "",
+          isCustom: true,
+        };
+        mutate((s) => ({ ...s, artists: { ...s.artists, [id]: artist } }));
+        return artist;
+      },
       incPlays: (trackId) => mutate((s) => ({ ...s, plays: { ...s.plays, [trackId]: (s.plays[trackId] ?? 0) + 1 } })),
       resetAll: () => {
         const fresh = emptyState();

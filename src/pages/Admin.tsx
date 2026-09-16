@@ -170,9 +170,98 @@ function ArtistSelect({ value, onChange }: { value: ArtistId; onChange: (v: Arti
   const { artists } = useStore();
   return (
     <select value={value} onChange={(e) => onChange(e.target.value as ArtistId)} className={inputCls}>
-      <option value="timur">{artists.timur.name} · {artists.timur.label}</option>
-      <option value="instasamka">{artists.instasamka.name} · {artists.instasamka.label}</option>
+      {Object.values(artists).map((a) => (
+        <option key={a.id} value={a.id}>{a.name} · {a.label}</option>
+      ))}
     </select>
+  );
+}
+
+function ArtistSelectWithCreate({ 
+  value, 
+  onChange, 
+  showEmpty = false 
+}: { 
+  value: "" | ArtistId; 
+  onChange: (v: "" | ArtistId) => void;
+  showEmpty?: boolean;
+}) {
+  const { artists, addArtist } = useStore();
+  const [showCreate, setShowCreate] = useState(false);
+  const [newArtistName, setNewArtistName] = useState("");
+  const [newArtistLabel, setNewArtistLabel] = useState("");
+
+  const handleCreate = () => {
+    if (!newArtistName.trim()) return;
+    const artist = addArtist(newArtistName.trim(), newArtistLabel.trim() || undefined);
+    onChange(artist.id);
+    setShowCreate(false);
+    setNewArtistName("");
+    setNewArtistLabel("");
+  };
+
+  return (
+    <div className="space-y-2">
+      <select 
+        value={value} 
+        onChange={(e) => {
+          if (e.target.value === "__create_new__") {
+            setShowCreate(true);
+          } else {
+            onChange(e.target.value as "" | ArtistId);
+          }
+        }} 
+        className={inputCls}
+      >
+        {showEmpty && <option value="">— без фита —</option>}
+        {Object.values(artists).map((a) => (
+          <option key={a.id} value={a.id}>{a.name}{a.isCustom ? ` (${a.label})` : ""}</option>
+        ))}
+        <option value="__create_new__">+ Создать нового артиста</option>
+      </select>
+      
+      {showCreate && (
+        <div className="border border-blue/50 rounded-lg p-3 space-y-2 bg-blue/5">
+          <div className="text-xs text-paper/60 font-semibold">Новый артист для фита</div>
+          <input
+            type="text"
+            value={newArtistName}
+            onChange={(e) => setNewArtistName(e.target.value)}
+            placeholder="Имя артиста"
+            className={inputCls}
+            autoFocus
+          />
+          <input
+            type="text"
+            value={newArtistLabel}
+            onChange={(e) => setNewArtistLabel(e.target.value)}
+            placeholder="Лейбл (необязательно)"
+            className={inputCls}
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleCreate}
+              disabled={!newArtistName.trim()}
+              className={btnPrimary}
+            >
+              СОЗДАТЬ
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowCreate(false);
+                setNewArtistName("");
+                setNewArtistLabel("");
+              }}
+              className={btnGhost}
+            >
+              ОТМЕНА
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -424,11 +513,7 @@ function TrackForm() {
           <ArtistSelect value={artistId} onChange={setArtistId} />
         </Field>
         <Field label="Feat. (необязательно)">
-          <select value={feat} onChange={(e) => setFeat(e.target.value as "" | ArtistId)} className={inputCls}>
-            <option value="">— без фита —</option>
-            <option value="timur">{artists.timur.name}</option>
-            <option value="instasamka">{artists.instasamka.name}</option>
-          </select>
+          <ArtistSelectWithCreate value={feat} onChange={setFeat} showEmpty />
         </Field>
         <Field label="Релиз (необязательно)">
           <select value={releaseId} onChange={(e) => setReleaseId(e.target.value)} className={inputCls}>
@@ -1033,11 +1118,7 @@ function EditTrackForm({ trackId, onClose }: { trackId: string; onClose: () => v
           <ArtistSelect value={artistId} onChange={setArtistId} />
         </Field>
         <Field label="Feat. (необязательно)">
-          <select value={feat} onChange={(e) => setFeat(e.target.value as "" | ArtistId)} className={inputCls}>
-            <option value="">— без фита —</option>
-            <option value="timur">{artists.timur.name}</option>
-            <option value="instasamka">{artists.instasamka.name}</option>
-          </select>
+          <ArtistSelectWithCreate value={feat} onChange={setFeat} showEmpty />
         </Field>
         <Field label="Релиз (необязательно)">
           <select value={releaseId} onChange={(e) => setReleaseId(e.target.value)} className={inputCls}>
