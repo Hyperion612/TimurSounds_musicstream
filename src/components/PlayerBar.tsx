@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { fmtTime } from "../lib/data";
 import { usePlayer } from "../lib/player";
 import { useStore } from "../lib/store";
 import { Cover, Eq } from "./ui";
 import { HeartIcon, PauseIcon, PlayIcon } from "./cards";
+import { FullScreenPlayer } from "./FullScreenPlayer";
 
 function SkipIcon({ back = false }: { back?: boolean }) {
   return (
@@ -16,6 +18,7 @@ function SkipIcon({ back = false }: { back?: boolean }) {
 export function PlayerBar() {
   const { track, playing, position, toggle, next, prev, seek, volume, setVolume, repeat, toggleRepeat, queue, qIndex } = usePlayer();
   const { favs, toggleFav, artist: getArtist, online } = useStore();
+  const [fullScreenOpen, setFullScreenOpen] = useState(false);
 
   const dur = track?.duration ?? 0;
   const artist = track ? getArtist(track.artistId) : null;
@@ -30,7 +33,10 @@ export function PlayerBar() {
 
       <div className="h-[72px] lg:h-[84px] px-3 lg:px-6 grid grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_minmax(0,2.2fr)_minmax(0,1fr)] items-center gap-3 lg:gap-6">
         {/* meta */}
-        <div className="flex items-center gap-3 min-w-0">
+        <div 
+          className="flex items-center gap-3 min-w-0 cursor-pointer lg:cursor-default"
+          onClick={() => track && setFullScreenOpen(true)}
+        >
           {track ? (
             <>
               <div className="relative shrink-0">
@@ -44,7 +50,10 @@ export function PlayerBar() {
                 </div>
               </div>
               <button
-                onClick={() => toggleFav(track.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleFav(track.id);
+                }}
                 className={`hidden sm:block ml-1 p-1.5 rounded transition-all hover:scale-110 ${favs.includes(track.id) ? "text-blue" : "text-paper/30 hover:text-paper"}`}
                 aria-label="В избранное"
               >
@@ -126,6 +135,8 @@ export function PlayerBar() {
           </div>
         </div>
       </div>
+      
+      <FullScreenPlayer isOpen={fullScreenOpen} onClose={() => setFullScreenOpen(false)} />
     </footer>
   );
 }
