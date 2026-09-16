@@ -331,9 +331,14 @@ export class FileSource implements Source {
   /** Сеть/декодирование не удались — плеер переключится на резервный звук. */
   onError: (() => void) | null = null;
   private el: HTMLAudioElement;
+  private objectUrl: string | null = null;
 
   constructor(url: string) {
     this.el = new Audio();
+    // Проверяем, является ли URL object URL (создан через URL.createObjectURL)
+    if (url.startsWith('blob:')) {
+      this.objectUrl = url;
+    }
     this.el.src = url;
     this.el.preload = "auto";
     this.el.addEventListener("ended", () => this.onEnded?.());
@@ -372,6 +377,11 @@ export class FileSource implements Source {
       if (this.el.readyState >= 1) this.el.currentTime = 0;
     } catch {
       /* ignore */
+    }
+    // Освобождаем object URL для предотвращения утечек памяти
+    if (this.objectUrl) {
+      URL.revokeObjectURL(this.objectUrl);
+      this.objectUrl = null;
     }
   }
   seek(sec: number) {

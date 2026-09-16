@@ -60,24 +60,48 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   };
 
   /* ---------- предзагрузка аудио (убирает ожидание сети при старте) ---------- */
-  const prefetchedRef = useRef(new Set<string>());
+  const prefetchedRef = useRef(new Map<string, HTMLAudioElement>());
   const prefetchTrack = useCallback((t: Track | null | undefined) => {
     const url = t?.audioUrl;
     if (!url || prefetchedRef.current.has(url)) return;
-    prefetchedRef.current.add(url);
+    
+    // Ограничиваем количество предзагруженных треков
+    if (prefetchedRef.current.size >= 3) {
+      const firstKey = prefetchedRef.current.keys().next().value;
+      if (firstKey) {
+        const oldAudio = prefetchedRef.current.get(firstKey);
+        oldAudio?.pause();
+        oldAudio?.removeAttribute('src');
+        oldAudio?.load();
+        prefetchedRef.current.delete(firstKey);
+      }
+    }
+    
     try {
       const a = new Audio();
       a.preload = "auto";
       a.src = url;
       a.load();
+      prefetchedRef.current.set(url, a);
     } catch {
       /* предзагрузка — оптимизация, не критична */
     }
+  }, []);
+  
+  // Очистка всех предзагруженных треков
+  const clearPrefetched = useCallback(() => {
+    prefetchedRef.current.forEach((audio) => {
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+    });
+    prefetchedRef.current.clear();
   }, []);
 
   const startSource = useCallback(async (t: Track, offset = 0) => {
     const token = ++tokenRef.current;
     destroySrc();
+    clearPrefetched(); // Очищаем все предзагруженные треки при переключении
     let src: Source | null = null;
     
     console.log(`[PLAYER] Попытка воспроизведения трека ${t.id} (${t.title})`);
@@ -163,7 +187,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const nq = queueRef.current;
     const ni = idxRef.current + 1;
     if (ni < nq.length) prefetchTrack(storeRef.current.getTrack(nq[ni]));
-  }, [prefetchTrack]);
+  }, [prefetchTrack, clearPrefetched]);
 
   const handleEnded = useCallback(() => {
     if (repeatRef.current) {
