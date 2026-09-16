@@ -612,8 +612,35 @@ function ReleaseForm() {
   );
 }
 
+/* ================= uploaded track row ================= */
+function UploadedTrackRow({ trackId, onEdit }: { trackId: string; onEdit: () => void }) {
+  const { getTrack, artist } = useStore();
+  const track = getTrack(trackId);
+  
+  if (!track) return null;
+  
+  return (
+    <div className="flex items-center justify-between bg-ink/40 rounded-lg p-3">
+      <div className="flex items-center gap-3 min-w-0 flex-1">
+        <Cover seed={track.seed} title={track.title} cover={track.cover} className="w-10 h-10 rounded-md border border-line shrink-0" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium truncate">{track.title}</div>
+          <div className="text-xs text-paper/40">{artist(track.artistId).name} · {fmtTime(track.duration)}</div>
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onEdit}
+        className="text-paper/50 hover:text-blue border border-line hover:border-blue rounded-lg px-3 py-2 text-xs font-display font-bold tracking-wider transition-all shrink-0 ml-2"
+      >
+        РЕДАКТИРОВАТЬ
+      </button>
+    </div>
+  );
+}
+
 /* ================= bulk track upload ================= */
-function BulkTrackUpload({ releaseId, artistId: defaultArtistId, onClose }: { releaseId: string; artistId: ArtistId; onClose: () => void }) {
+function BulkTrackUpload({ releaseId, artistId: defaultArtistId, onClose }: { releaseId?: string; artistId: ArtistId; onClose: () => void }) {
   const { addTrack, artists } = useStore();
   const [files, setFiles] = useState<File[]>([]);
   const [artistId, setArtistId] = useState<ArtistId>(defaultArtistId);
@@ -621,6 +648,8 @@ function BulkTrackUpload({ releaseId, artistId: defaultArtistId, onClose }: { re
   const [progress, setProgress] = useState(0);
   const [msg, setMsg] = useState("");
   const [errors, setErrors] = useState<string[]>([]);
+  const [uploadedTrackIds, setUploadedTrackIds] = useState<string[]>([]);
+  const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -647,12 +676,15 @@ function BulkTrackUpload({ releaseId, artistId: defaultArtistId, onClose }: { re
     setBusy(true);
     setProgress(0);
     setErrors([]);
+    setUploadedTrackIds([]);
     
     const errors: string[] = [];
+    const trackIds: string[] = [];
     
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      const id = `u${Date.now().toString(36)}${i}`;
+      // Генерируем уникальный ID с использованием timestamp и случайного числа
+      const id = `u${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}${i}`;
       
       try {
         // Читаем метаданные
@@ -699,20 +731,21 @@ function BulkTrackUpload({ releaseId, artistId: defaultArtistId, onClose }: { re
         };
         
         addTrack(track);
+        trackIds.push(id);
         setProgress(((i + 1) / files.length) * 100);
       } catch (e) {
         errors.push(`Ошибка загрузки "${file.name}": ${e instanceof Error ? e.message : 'неизвестная ошибка'}`);
       }
     }
     
+    setUploadedTrackIds(trackIds);
     setBusy(false);
     
     if (errors.length > 0) {
       setErrors(errors);
-      setMsg(`Загружено ${files.length - errors.length} из ${files.length} треков`);
+      setMsg(`Загружено ${trackIds.length} из ${files.length} треков`);
     } else {
-      setMsg(`Успешно загружено ${files.length} треков`);
-      setTimeout(() => onClose(), 2000);
+      setMsg(`Успешно загружено ${trackIds.length} треков`);
     }
   };
 
@@ -814,22 +847,43 @@ function BulkTrackUpload({ releaseId, artistId: defaultArtistId, onClose }: { re
           </div>
         )}
         
+        {uploadedTrackIds.length > 0 && (
+          <div className="border border-line rounded-lg p-4 space-y-3">
+            <div className="text-xs text-paper/60 font-semibold uppercase tracking-wider">Загруженные треки</div>
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {uploadedTrackIds.map((trackId) => (
+                <UploadedTrackRow 
+                  key={trackId} 
+                  trackId={trackId} 
+                  onEdit={() => setEditingTrackId(trackId)} 
+                />
+              ))}
+            </div>
+          </div>
+        )}
+        
+        {editingTrackId && (
+          <EditTrackForm trackId={editingTrackId} onClose={() => setEditingTrackId(null)} />
+        )}
+        
         <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={uploadAll}
-            disabled={files.length === 0 || busy}
-            className={btnPrimary}
-          >
-            {busy ? 'ЗАГРУЗКА...' : `ЗАГРУЗИТЬ ${files.length} ТРЕК(ОВ)`}
-          </button>
+          {uploadedTrackIds.length === 0 && (
+            <button
+              type="button"
+              onClick={uploadAll}
+              disabled={files.length === 0 || busy}
+              className={btnPrimary}
+            >
+              {busy ? 'ЗАГРУЗКА...' : `ЗАГРУЗИТЬ ${files.length} ТРЕК(ОВ)`}
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}
             disabled={busy}
             className={btnGhost}
           >
-            ОТМЕНА
+            {uploadedTrackIds.length > 0 ? 'ЗАКРЫТЬ' : 'ОТМЕНА'}
           </button>
         </div>
       </div>
@@ -2006,6 +2060,7 @@ function Dashboard() {
   const { tracks, releases, news, upcoming, users, deleteTrack, deleteRelease, deleteNews, logout, playsOf, artists, syncMode, resetAll } = useStore();
   const [tab, setTab] = useState<Tab>("tracks");
   const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
   resetRef.current = resetAll;
 
   const tabs: { id: Tab; label: string; count: number }[] = [
@@ -2050,6 +2105,22 @@ function Dashboard() {
         <div className="space-y-6">
           <TrackForm />
           {editingTrackId && <EditTrackForm trackId={editingTrackId} onClose={() => setEditingTrackId(null)} />}
+          {showBulkUpload && (
+            <BulkTrackUpload 
+              artistId="timur" 
+              onClose={() => setShowBulkUpload(false)} 
+            />
+          )}
+          {!showBulkUpload && (
+            <button
+              type="button"
+              onClick={() => setShowBulkUpload(true)}
+              className="w-full border-2 border-dashed border-line hover:border-blue rounded-lg p-4 text-center transition-colors"
+            >
+              <div className="text-paper/60 text-sm font-semibold">МАССОВАЯ ЗАГРУЗКА ТРЕКОВ</div>
+              <div className="text-paper/40 text-xs mt-1">Загрузите несколько аудиофайлов одновременно</div>
+            </button>
+          )}
           <div className="border border-line rounded-xl bg-coal/40 divide-y divide-line/60 overflow-hidden">
             {tracks.map((t) => (
               <div key={t.id} className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.03] transition-colors">
